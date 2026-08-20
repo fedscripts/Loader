@@ -1,3 +1,7 @@
+--// ================================================================
+--//   SCRIPT SOURCES — paste your scripts here
+--// ================================================================
+
 local function RunFlingScript()
 
     -- Orbit | Fling Things and People
@@ -1013,7 +1017,1571 @@ end
 
 local function RunUniversalScript()
 
-    -- PASTE YOUR UNIVERSAL SCRIPT SOURCE HERE
+    local SolarisLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/fedscripts/Orbit-UI/refs/heads/main/Library", true))()
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting         = game:GetService("Lighting")
+local TweenService     = game:GetService("TweenService")
+local Workspace        = game:GetService("Workspace")
+
+local localPlayer = Players.LocalPlayer
+local camera      = Workspace.CurrentCamera
+local mouse       = localPlayer:GetMouse()
+
+local function getCharacter()  return localPlayer.Character end
+local function getHRP()        local c = getCharacter() return c and c:FindFirstChild("HumanoidRootPart") end
+local function getHumanoid()   local c = getCharacter() return c and c:FindFirstChildOfClass("Humanoid") end
+local function getRootCFrame() local h = getHRP() return h and h.CFrame end
+
+local AimbotSettings = {
+    Enabled       = false,
+    WallCheck     = false,
+    TeamCheck     = false,
+    BotCheck      = false,
+    RageAim       = false,
+    TriggerBot    = false,
+    SilentAim     = false,
+    FOV           = 150,
+    Smoothing     = 50,
+    Bone          = "Head",
+    AimbotBind    = Enum.UserInputType.MouseButton2,
+}
+
+local MovementSettings = {
+    FlyEnabled       = false,
+    FlySpeed         = 50,
+    InfJump          = false,
+    SpeedEnabled     = false,
+    WalkSpeed        = 16,
+    BHop             = false,
+    FakeLag          = false,
+    SpinbotHoriz     = false,
+    AutoReset        = false,
+}
+
+local TeleportSettings = {
+    Waypoints       = {},
+    SpawnPoint      = nil,
+    TargetPlayer    = "",
+    LoopTeleport    = false,
+    LoopSpook       = false,
+    ViewPlayer      = false,
+    SpectatePlayer  = false,
+}
+
+local CameraSettings = {
+    FOV            = 70,
+    ForceFP        = false,
+    ForceTHP       = false,
+}
+
+local ESPSettings = {
+    Enabled        = true,
+    ShowBox        = false,
+    BoxColor       = Color3.fromRGB(255, 255, 255),
+    ShowName       = false,
+    NameColor      = Color3.fromRGB(255, 255, 255),
+    ShowHealth     = false,
+    ShowDistance   = false,
+    ShowSkeletons  = false,
+    SkeletonsColor = Color3.fromRGB(255, 255, 255),
+    ShowTracer     = false,
+    TracerColor    = Color3.fromRGB(255, 255, 255),
+    TracerPosition = "Bottom",
+    TeamColors     = false,
+    Teamcheck      = false,
+    WallCheck      = false,
+}
+
+local WorldSettings = {
+    Material       = Enum.Material.SmoothPlastic,
+    Color          = Color3.fromRGB(163, 162, 165),
+    Applied        = false,
+}
+
+local AutoClickerSettings = {
+    Enabled  = false,
+    CPS      = 10,
+    Keybind  = Enum.KeyCode.F,
+}
+
+-- Projection Sorcery state
+local ProjectionSettings = {
+    Enabled         = false,
+    FrameCount      = 24,
+    RecordedFrames  = {},
+    IsRecording     = false,
+    IsPlaying       = false,
+    PlaybackSpeed   = 1.0,
+    LoopPlayback    = false,
+    CurrentFrame    = 0,
+}
+
+local aiming       = false
+local fovCircle    = nil
+local silentTarget = nil
+
+local BONE_LIST = {
+    "Head", "UpperTorso", "LowerTorso",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperArm",  "LeftLowerArm",  "LeftHand",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+    "LeftUpperLeg",  "LeftLowerLeg",  "LeftFoot",
+    "HumanoidRootPart",
+}
+
+local function isVisible(part)
+    if not part then return false end
+    local origin    = camera.CFrame.Position
+    local direction = (part.Position - origin)
+    local params    = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {localPlayer.Character, part.Parent}
+    local result = Workspace:Raycast(origin, direction, params)
+    return result == nil
+end
+
+local function isAlive(player)
+    local c = player.Character
+    if not c then return false end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function getBonePart(character, boneName)
+    return character:FindFirstChild(boneName)
+end
+
+local function findPlayerByNameOrDisplay(query)
+    if not query or query == "" then return nil end
+    local q = query:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower() == q then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.DisplayName:lower() == q then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower():find(q, 1, true) then return p end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.DisplayName:lower():find(q, 1, true) then return p end
+    end
+    return nil
+end
+
+local function parsePlayerList(str)
+    local names = {}
+    for name in str:gmatch("[^,]+") do
+        name = name:match("^%s*(.-)%s*$")
+        if name ~= "" then names[#names+1] = name end
+    end
+    return names
+end
+
+local function getClosestPlayer()
+    local hrp = getHRP()
+    if not hrp then return nil end
+    local closest, bestDist = nil, math.huge
+
+    if not AimbotSettings.RageAim then
+        local mousePos = UserInputService:GetMouseLocation()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == localPlayer then continue end
+            if not isAlive(player) then continue end
+            if AimbotSettings.TeamCheck and player.Team == localPlayer.Team then continue end
+            local character = player.Character
+            if not character then continue end
+            local head = character:FindFirstChild("Head")
+            if not head then continue end
+            if AimbotSettings.WallCheck and not isVisible(head) then continue end
+            local screenPos, onScreen = camera:WorldToScreenPoint(head.Position)
+            if onScreen and screenPos.Z > 0 then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                if dist < bestDist and dist <= AimbotSettings.FOV then
+                    bestDist = dist
+                    closest  = player
+                end
+            end
+        end
+    else
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == localPlayer then continue end
+            if not isAlive(player) then continue end
+            if AimbotSettings.TeamCheck and player.Team == localPlayer.Team then continue end
+            local character = player.Character
+            if not character then continue end
+            local tHRP = character:FindFirstChild("HumanoidRootPart")
+            if not tHRP then continue end
+            local dist = (hrp.Position - tHRP.Position).Magnitude
+            if dist < bestDist then
+                bestDist = dist
+                closest  = player
+            end
+        end
+    end
+    return closest
+end
+
+-- ─────────────────────────────────────────────────
+--  ESP
+-- ─────────────────────────────────────────────────
+local espBoxDrawings      = {}
+local espNameDrawings     = {}
+local espHealthBGDrawings = {}
+local espHealthDrawings   = {}
+local espDistDrawings     = {}
+local espTracerDrawings   = {}
+local espSkeletonConns    = {}
+local espSkeletonBones    = {}
+
+local BONE_PAIRS = {
+    {"Head","UpperTorso","Head","Torso"},
+    {"UpperTorso","LowerTorso",nil,nil},
+    {"UpperTorso","LeftUpperArm","Torso","Left Arm"},
+    {"LeftUpperArm","LeftLowerArm",nil,nil},
+    {"LeftLowerArm","LeftHand",nil,nil},
+    {"UpperTorso","RightUpperArm","Torso","Right Arm"},
+    {"RightUpperArm","RightLowerArm",nil,nil},
+    {"RightLowerArm","RightHand",nil,nil},
+    {"LowerTorso","LeftUpperLeg","Torso","Left Leg"},
+    {"LeftUpperLeg","LeftLowerLeg",nil,nil},
+    {"LeftLowerLeg","LeftFoot",nil,nil},
+    {"LowerTorso","RightUpperLeg","Torso","Right Leg"},
+    {"RightUpperLeg","RightLowerLeg",nil,nil},
+    {"RightLowerLeg","RightFoot",nil,nil},
+}
+
+local function nd(class, props)
+    local d = Drawing.new(class)
+    for k, v in pairs(props) do d[k] = v end
+    return d
+end
+
+local function createESPForPlayer(player)
+    if player == localPlayer then return end
+    if espBoxDrawings[player] then return end
+
+    espBoxDrawings[player]      = nd("Square", {Color=ESPSettings.BoxColor,     Thickness=1, Filled=false, Visible=false})
+    espNameDrawings[player]     = nd("Text",   {Color=ESPSettings.NameColor,    Size=13, Center=true, Outline=true, Visible=false, Font=3})
+    espHealthBGDrawings[player] = nd("Line",   {Color=Color3.new(0,0,0),        Thickness=3, Visible=false})
+    espHealthDrawings[player]   = nd("Line",   {Color=Color3.new(0,1,0),        Thickness=1, Visible=false})
+    espDistDrawings[player]     = nd("Text",   {Color=Color3.new(0.7,0.7,0.7),  Size=11, Center=true, Outline=true, Visible=false, Font=3})
+    espTracerDrawings[player]   = nd("Line",   {Color=ESPSettings.TracerColor,  Thickness=1, Visible=false})
+
+    local bones = {}
+    for i = 1, #BONE_PAIRS do
+        bones[i] = nd("Line", {Color=ESPSettings.SkeletonsColor, Thickness=1, Visible=false})
+    end
+    espSkeletonBones[player] = bones
+
+    local function updateSkeleton()
+        local vis = ESPSettings.ShowSkeletons
+        local character = player.Character
+        if not vis or not character then
+            for _, b in ipairs(bones) do b.Visible = false end
+            return
+        end
+        local isR15 = character:FindFirstChild("UpperTorso") ~= nil
+        local col   = ESPSettings.SkeletonsColor
+        for i, pair in ipairs(BONE_PAIRS) do
+            local b  = bones[i]
+            local p1 = isR15 and character:FindFirstChild(pair[1]) or (pair[3] and character:FindFirstChild(pair[3]))
+            local p2 = isR15 and character:FindFirstChild(pair[2]) or (pair[4] and character:FindFirstChild(pair[4]))
+            if p1 and p2 then
+                local s1, v1 = camera:WorldToViewportPoint(p1.Position)
+                local s2, v2 = camera:WorldToViewportPoint(p2.Position)
+                if v1 and v2 and s1.Z > 0 and s2.Z > 0 then
+                    b.From    = Vector2.new(s1.X, s1.Y)
+                    b.To      = Vector2.new(s2.X, s2.Y)
+                    b.Color   = col
+                    b.Visible = true
+                else
+                    b.Visible = false
+                end
+            else
+                b.Visible = false
+            end
+        end
+    end
+
+    espSkeletonConns[player] = RunService.RenderStepped:Connect(updateSkeleton)
+end
+
+local function removeESPForPlayer(player)
+    if espBoxDrawings[player]      then espBoxDrawings[player]:Remove()      espBoxDrawings[player]      = nil end
+    if espNameDrawings[player]     then espNameDrawings[player]:Remove()     espNameDrawings[player]     = nil end
+    if espHealthBGDrawings[player] then espHealthBGDrawings[player]:Remove() espHealthBGDrawings[player] = nil end
+    if espHealthDrawings[player]   then espHealthDrawings[player]:Remove()   espHealthDrawings[player]   = nil end
+    if espDistDrawings[player]     then espDistDrawings[player]:Remove()     espDistDrawings[player]     = nil end
+    if espTracerDrawings[player]   then espTracerDrawings[player]:Remove()   espTracerDrawings[player]   = nil end
+    if espSkeletonConns[player]    then espSkeletonConns[player]:Disconnect() espSkeletonConns[player]   = nil end
+    if espSkeletonBones[player] then
+        for _, b in ipairs(espSkeletonBones[player]) do b:Remove() end
+        espSkeletonBones[player] = nil
+    end
+end
+
+local function updateESPForPlayer(player)
+    local box      = espBoxDrawings[player]
+    local nameDraw = espNameDrawings[player]
+    local hpBG     = espHealthBGDrawings[player]
+    local hpBar    = espHealthDrawings[player]
+    local distDraw = espDistDrawings[player]
+    local tracer   = espTracerDrawings[player]
+    if not box then return end
+
+    local function hideAll()
+        box.Visible      = false
+        nameDraw.Visible = false
+        hpBG.Visible     = false
+        hpBar.Visible    = false
+        distDraw.Visible = false
+        tracer.Visible   = false
+    end
+
+    if not player or not player.Parent then hideAll() return end
+
+    local character = player.Character
+    if not character then hideAll() return end
+    local hrp      = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid or humanoid.Health <= 0 then hideAll() return end
+
+    local rootPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+    if not onScreen or rootPos.Z <= 0 then hideAll() return end
+
+    local head   = character:FindFirstChild("Head")
+    local headV  = head and camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0)) or rootPos
+    local legV   = camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+
+    local boxH   = math.abs(headV.Y - legV.Y)
+    local boxW   = 2350 / rootPos.Z
+    local bPos   = Vector2.new(rootPos.X - boxW / 2, rootPos.Y - boxH / 2)
+    local bSize  = Vector2.new(boxW, boxH)
+    local col    = ESPSettings.BoxColor
+
+    if ESPSettings.ShowBox then
+        box.Position = bPos
+        box.Size     = bSize
+        box.Color    = col
+        box.Visible  = true
+    else
+        box.Visible  = false
+    end
+
+    if ESPSettings.ShowName then
+        nameDraw.Text     = "[" .. player.Name:upper() .. "]"
+        nameDraw.Position = Vector2.new(rootPos.X, bPos.Y - 20)
+        nameDraw.Color    = ESPSettings.NameColor
+        nameDraw.Visible  = true
+    else
+        nameDraw.Visible  = false
+    end
+
+    if ESPSettings.ShowHealth then
+        local pct  = humanoid.Health / math.max(humanoid.MaxHealth, 1)
+        local barX = bPos.X - 5
+        hpBG.From  = Vector2.new(barX, bPos.Y + bSize.Y)
+        hpBG.To    = Vector2.new(barX, bPos.Y)
+        hpBG.Visible = true
+        hpBar.From  = Vector2.new(barX, bPos.Y + bSize.Y)
+        hpBar.To    = Vector2.new(barX, bPos.Y + bSize.Y - pct * bSize.Y)
+        hpBar.Color = Color3.new(1 - pct, pct, 0)
+        hpBar.Visible = true
+    else
+        hpBG.Visible  = false
+        hpBar.Visible = false
+    end
+
+    if ESPSettings.ShowDistance then
+        local dist = (camera.CFrame.Position - hrp.Position).Magnitude
+        distDraw.Text     = string.format("[%.0fm]", dist)
+        distDraw.Position = Vector2.new(rootPos.X, bPos.Y + bSize.Y + 4)
+        distDraw.Visible  = true
+    else
+        distDraw.Visible  = false
+    end
+
+    if ESPSettings.ShowTracer then
+        local originY = ESPSettings.TracerPosition == "Top"    and 0
+                     or ESPSettings.TracerPosition == "Middle" and camera.ViewportSize.Y / 2
+                     or camera.ViewportSize.Y
+        tracer.From    = Vector2.new(camera.ViewportSize.X / 2, originY)
+        tracer.To      = Vector2.new(rootPos.X, rootPos.Y)
+        tracer.Color   = ESPSettings.TracerColor
+        tracer.Visible = true
+    else
+        tracer.Visible = false
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  MOVEMENT INTERNALS
+-- ─────────────────────────────────────────────────
+local flyForce, flyConn  = nil, nil
+local horizSpinConn      = nil
+local horizSpinAngle     = 0
+local infJumpConn        = nil
+local bhopConn           = nil
+local autoResetThread    = nil
+local defaultGravity     = Workspace.Gravity
+local defaultWalkSpeed   = 16
+
+local forceTHPConn = nil
+local function startForceThirdPerson()
+    if forceTHPConn then return end
+    for _, v in ipairs(localPlayer.PlayerScripts:GetDescendants()) do
+        if v:IsA("LocalScript") and (v.Name:lower():find("camera") or v.Name:lower():find("zoom") or v.Name:lower():find("lock")) then
+            v.Disabled = true
+        end
+    end
+    localPlayer.CameraMode = Enum.CameraMode.Classic
+    camera.CameraType      = Enum.CameraType.Custom
+    forceTHPConn = RunService.RenderStepped:Connect(function()
+        if not CameraSettings.ForceTHP then
+            forceTHPConn:Disconnect()
+            forceTHPConn = nil
+            return
+        end
+        localPlayer.CameraMode = Enum.CameraMode.Classic
+        camera.CameraType      = Enum.CameraType.Custom
+        local hum = getHumanoid()
+        if hum then camera.CameraSubject = hum end
+        if camera.CFrame == camera.Focus then
+            local hrp = getHRP()
+            if hrp then
+                camera.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 5, 10), hrp.Position)
+            end
+        end
+    end)
+end
+
+local function stopForceThirdPerson()
+    CameraSettings.ForceTHP = false
+    if forceTHPConn then forceTHPConn:Disconnect() forceTHPConn = nil end
+    camera.CameraType = Enum.CameraType.Custom
+end
+
+local function startFlying()
+    if flyForce then return end
+    local hrp = getHRP()
+    local hum = getHumanoid()
+    if not hrp or not hum then return end
+    Workspace.Gravity = 0
+    flyForce = Instance.new("BodyVelocity")
+    flyForce.Velocity  = Vector3.zero
+    flyForce.MaxForce  = Vector3.new(math.huge, math.huge, math.huge)
+    flyForce.Parent    = hrp
+    hum:ChangeState(Enum.HumanoidStateType.Flying)
+    flyConn = RunService.Heartbeat:Connect(function()
+        local hrp2 = getHRP()
+        if not hrp2 or not flyForce then return end
+        local cam = camera.CFrame
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W)           then dir += cam.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S)           then dir -= cam.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A)           then dir -= cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D)           then dir += cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then dir += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0,1,0) end
+        flyForce.Velocity = (dir.Magnitude > 0 and dir.Unit or Vector3.zero) * MovementSettings.FlySpeed
+    end)
+end
+
+local function stopFlying()
+    if flyForce then flyForce:Destroy() flyForce = nil end
+    if flyConn  then flyConn:Disconnect()  flyConn  = nil end
+    Workspace.Gravity = defaultGravity
+    local hum = getHumanoid()
+    if hum then hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
+end
+
+local function spinHoriz(dt)
+    local hrp = getHRP()
+    if not hrp then return end
+    horizSpinAngle = horizSpinAngle + math.rad(360 * dt * 3)
+    local pos = hrp.Position
+    hrp.CFrame = CFrame.new(pos) * CFrame.Angles(0, horizSpinAngle, 0)
+end
+
+-- ─────────────────────────────────────────────────
+--  FAKE LAG
+-- ─────────────────────────────────────────────────
+local fakeLagThread = nil
+local fakeLagFrozen = false
+
+local function startFakeLag()
+    if fakeLagThread then return end
+    fakeLagThread = task.spawn(function()
+        while MovementSettings.FakeLag do
+            local hrp = getHRP()
+            if hrp then
+                hrp.Anchored  = true
+                fakeLagFrozen = true
+            end
+            task.wait(0.5)
+            if hrp then
+                hrp.Anchored  = false
+                fakeLagFrozen = false
+            end
+            task.wait(0.5)
+        end
+        local hrp = getHRP()
+        if hrp then hrp.Anchored = false end
+        fakeLagFrozen = false
+        fakeLagThread = nil
+    end)
+end
+
+local function stopFakeLag()
+    MovementSettings.FakeLag = false
+    if fakeLagThread then
+        task.cancel(fakeLagThread)
+        fakeLagThread = nil
+    end
+    local hrp = getHRP()
+    if hrp then hrp.Anchored = false end
+    fakeLagFrozen = false
+end
+
+-- ─────────────────────────────────────────────────
+--  TELEPORT INTERNALS
+-- ─────────────────────────────────────────────────
+local loopTeleportConn = nil
+local loopSpookConn    = nil
+local viewPlayerConn   = nil
+local spectateConn     = nil
+
+local function teleportToPlayer(name)
+    local target = findPlayerByNameOrDisplay(name)
+    if not target then return end
+    local hrp  = getHRP()
+    local tHRP = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if hrp and tHRP then
+        hrp.CFrame = tHRP.CFrame * CFrame.new(0, 0, 4)
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  AUTO CLICKER INTERNALS
+-- ─────────────────────────────────────────────────
+local autoClickConn = nil
+
+local function startAutoClicker()
+    if autoClickConn then return end
+    autoClickConn = task.spawn(function()
+        while AutoClickerSettings.Enabled do
+            mouse1click()
+            task.wait(1 / math.max(AutoClickerSettings.CPS, 1))
+        end
+    end)
+end
+
+local function stopAutoClicker()
+    AutoClickerSettings.Enabled = false
+    autoClickConn = nil
+end
+
+-- ─────────────────────────────────────────────────
+--  WORLD SETTINGS
+-- ─────────────────────────────────────────────────
+local MATERIAL_MAP = {
+    ["Smooth Plastic"] = Enum.Material.SmoothPlastic,
+    ["Brick"]          = Enum.Material.Brick,
+    ["Sand"]           = Enum.Material.Sand,
+    ["Ice"]            = Enum.Material.Ice,
+    ["Wood"]           = Enum.Material.Wood,
+    ["Neon"]           = Enum.Material.Neon,
+    ["Metal"]          = Enum.Material.Metal,
+    ["Grass"]          = Enum.Material.Grass,
+    ["Glass"]          = Enum.Material.Glass,
+}
+
+local savedPartData = {}
+
+local function saveOriginalParts()
+    savedPartData = {}
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            savedPartData[v] = {
+                Material  = v.Material,
+                Color     = v.Color,
+                BrickColor = v.BrickColor,
+                -- Also save texture so we can properly restore
+                TextureID = v:FindFirstChildOfClass("SpecialMesh") and v:FindFirstChildOfClass("SpecialMesh").TextureId or nil,
+            }
+        end
+    end
+end
+
+local function applyWorld(material, color)
+    local char = getCharacter()
+    local hrp  = getHRP()
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            if v == hrp then continue end
+            if char and v:IsDescendantOf(char) then continue end
+            v.Material = material
+            v.Color    = color
+            -- Clear any existing textures on parts to avoid layering issues
+            for _, tex in ipairs(v:GetChildren()) do
+                if tex:IsA("Texture") or tex:IsA("Decal") then
+                    tex:Destroy()
+                end
+            end
+        end
+    end
+end
+
+local function resetWorld()
+    for part, data in pairs(savedPartData) do
+        if part and part.Parent then
+            part.Material   = data.Material
+            part.Color      = data.Color
+            part.BrickColor = data.BrickColor
+        end
+    end
+end
+
+local function clearAllWorld()
+    local char = getCharacter()
+    local hrp  = getHRP()
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            if v == hrp then continue end
+            if char and v:IsDescendantOf(char) then continue end
+            v.Material   = Enum.Material.SmoothPlastic
+            v.Color      = Color3.fromRGB(163, 162, 165)
+            v.BrickColor = BrickColor.new("Medium stone grey")
+            -- Clear textures so retexture is clean
+            for _, tex in ipairs(v:GetChildren()) do
+                if tex:IsA("Texture") or tex:IsA("Decal") then
+                    tex:Destroy()
+                end
+            end
+        end
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  LIGHTING / TIME OF DAY
+-- ─────────────────────────────────────────────────
+local function setTimeOfDay(preset)
+    if preset == "Daytime" then
+        Lighting.TimeOfDay        = "12:00:00"
+        Lighting.Brightness       = 2
+        Lighting.Ambient          = Color3.fromRGB(178, 178, 178)
+        Lighting.OutdoorAmbient   = Color3.fromRGB(128, 128, 128)
+        Lighting.FogEnd           = 100000
+    elseif preset == "Sunset" then
+        Lighting.TimeOfDay        = "18:30:00"
+        Lighting.Brightness       = 1.2
+        Lighting.Ambient          = Color3.fromRGB(200, 120, 60)
+        Lighting.OutdoorAmbient   = Color3.fromRGB(170, 90, 40)
+        Lighting.FogEnd           = 60000
+    elseif preset == "Night" then
+        Lighting.TimeOfDay        = "00:00:00"
+        Lighting.Brightness       = 0
+        Lighting.Ambient          = Color3.fromRGB(20, 20, 30)
+        Lighting.OutdoorAmbient   = Color3.fromRGB(10, 10, 20)
+        Lighting.FogEnd           = 10000
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  PROJECTION SORCERY
+-- ─────────────────────────────────────────────────
+local projRecordConn  = nil
+local projPlayConn    = nil
+local projGhostParts  = {}
+
+local function clearGhostParts()
+    for _, p in ipairs(projGhostParts) do
+        if p and p.Parent then p:Destroy() end
+    end
+    projGhostParts = {}
+end
+
+local function startProjectionRecording()
+    if ProjectionSettings.IsRecording then return end
+    ProjectionSettings.IsRecording = true
+    ProjectionSettings.RecordedFrames = {}
+    local frameInterval = 1 / ProjectionSettings.FrameCount
+    local elapsed = 0
+    clearGhostParts()
+
+    projRecordConn = RunService.Heartbeat:Connect(function(dt)
+        if not ProjectionSettings.IsRecording then
+            projRecordConn:Disconnect()
+            projRecordConn = nil
+            return
+        end
+        elapsed = elapsed + dt
+        if elapsed >= frameInterval then
+            elapsed = elapsed - frameInterval
+            local hrp = getHRP()
+            if hrp then
+                local frameIndex = #ProjectionSettings.RecordedFrames + 1
+                ProjectionSettings.RecordedFrames[frameIndex] = hrp.CFrame
+
+                -- Spawn a ghost at each recorded frame position
+                local ghost = Instance.new("Part")
+                ghost.Anchored        = true
+                ghost.CanCollide      = false
+                ghost.Transparency    = 0.75
+                ghost.BrickColor      = BrickColor.new("Bright blue")
+                ghost.Material        = Enum.Material.Neon
+                ghost.Size            = Vector3.new(2, 5, 1)
+                ghost.CFrame          = hrp.CFrame
+                ghost.Parent          = Workspace
+                ghost.Name            = "ProjGhost_" .. frameIndex
+                projGhostParts[frameIndex] = ghost
+
+                if frameIndex >= ProjectionSettings.FrameCount then
+                    ProjectionSettings.IsRecording = false
+                    if projRecordConn then
+                        projRecordConn:Disconnect()
+                        projRecordConn = nil
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopProjectionRecording()
+    ProjectionSettings.IsRecording = false
+    if projRecordConn then
+        projRecordConn:Disconnect()
+        projRecordConn = nil
+    end
+end
+
+local function playbackProjection()
+    if ProjectionSettings.IsPlaying then return end
+    if #ProjectionSettings.RecordedFrames == 0 then return end
+    ProjectionSettings.IsPlaying = true
+    ProjectionSettings.CurrentFrame = 1
+
+    local frameInterval = (1 / ProjectionSettings.FrameCount) / math.max(ProjectionSettings.PlaybackSpeed, 0.1)
+    local elapsed = 0
+
+    projPlayConn = RunService.Heartbeat:Connect(function(dt)
+        if not ProjectionSettings.IsPlaying then
+            projPlayConn:Disconnect()
+            projPlayConn = nil
+            return
+        end
+        elapsed = elapsed + dt
+        if elapsed >= frameInterval then
+            elapsed = elapsed - frameInterval
+            local frameIdx = ProjectionSettings.CurrentFrame
+            local cf = ProjectionSettings.RecordedFrames[frameIdx]
+            if cf then
+                local hrp = getHRP()
+                if hrp then
+                    hrp.CFrame = cf
+                end
+            end
+            ProjectionSettings.CurrentFrame = ProjectionSettings.CurrentFrame + 1
+            if ProjectionSettings.CurrentFrame > #ProjectionSettings.RecordedFrames then
+                if ProjectionSettings.LoopPlayback then
+                    ProjectionSettings.CurrentFrame = 1
+                else
+                    ProjectionSettings.IsPlaying = false
+                    if projPlayConn then
+                        projPlayConn:Disconnect()
+                        projPlayConn = nil
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopPlayback()
+    ProjectionSettings.IsPlaying = false
+    if projPlayConn then
+        projPlayConn:Disconnect()
+        projPlayConn = nil
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  CREATE WINDOW
+-- ─────────────────────────────────────────────────
+local win = SolarisLib:New({
+    Name         = "fedscripts | Univ1.4.1",
+    FolderToSave = "FedFPS"
+})
+
+-- ─────────────────────────────────────────────────
+--  TABS
+-- ─────────────────────────────────────────────────
+local AimbotTab     = win:Tab("Aimbot")
+local ESPTab        = win:Tab("ESP")
+local MovementTab   = win:Tab("Movement")
+local PlayersTab    = win:Tab("Players")
+local WaypointsTab  = win:Tab("Waypoints")
+local WorldTab      = win:Tab("World")
+local ProjectionTab = win:Tab("Projection")
+local MiscTab       = win:Tab("Misc")
+
+-- ═══════════════════════════════════════════════
+--  AIMBOT TAB
+-- ═══════════════════════════════════════════════
+local AimbotSec = AimbotTab:Section("Aimbot")
+
+AimbotSec:Label("Hold RMB to activate. Snaps to nearest player in FOV.")
+
+AimbotSec:Toggle("Aimbot Enabled", false, "AimbotEnabled", function(v)
+    AimbotSettings.Enabled = v
+end)
+
+AimbotSec:Toggle("Wall Check", false, "AimbotWallCheck", function(v)
+    AimbotSettings.WallCheck = v
+end)
+
+AimbotSec:Toggle("Team Check", false, "AimbotTeamCheck", function(v)
+    AimbotSettings.TeamCheck = v
+end)
+
+AimbotSec:Toggle("Bot Check", false, "AimbotBotCheck", function(v)
+    AimbotSettings.BotCheck = v
+end)
+
+local AimbotModesSec = AimbotTab:Section("Modes")
+
+AimbotModesSec:Label("Rage Aim: snaps to nearest by distance, ignores FOV circle.")
+
+AimbotModesSec:Toggle("Rage Aim", false, "AimbotRageAim", function(v)
+    AimbotSettings.RageAim = v
+    if v then AimbotSettings.Smoothing = 0 end
+end)
+
+AimbotModesSec:Toggle("Trigger Bot", false, "AimbotTriggerBot", function(v)
+    AimbotSettings.TriggerBot = v
+end)
+
+AimbotModesSec:Toggle("Silent Aim", false, "AimbotSilentAim", function(v)
+    AimbotSettings.SilentAim = v
+end)
+
+local AimbotConfigSec = AimbotTab:Section("Configuration")
+
+AimbotConfigSec:Dropdown("Aim Bone", BONE_LIST, "Head", "AimbotBone", function(v)
+    AimbotSettings.Bone = v
+end)
+
+AimbotConfigSec:Slider("FOV Radius", 10, 500, 150, 1, "AimbotFOV", function(v)
+    AimbotSettings.FOV = v
+    if fovCircle then fovCircle.Radius = v end
+end)
+
+AimbotConfigSec:Slider("Smoothing", 0, 100, 50, 1, "AimbotSmoothing", function(v)
+    AimbotSettings.Smoothing = v
+end)
+
+AimbotConfigSec:Toggle("Show FOV Circle", false, "AimbotShowFOV", function(v)
+    if v then
+        fovCircle               = Drawing.new("Circle")
+        fovCircle.Visible       = true
+        fovCircle.Color         = Color3.fromRGB(110, 110, 220)
+        fovCircle.Thickness     = 1
+        fovCircle.NumSides      = 64
+        fovCircle.Radius        = AimbotSettings.FOV
+        fovCircle.Filled        = false
+        fovCircle.Transparency  = 1
+    else
+        if fovCircle then fovCircle:Remove() fovCircle = nil end
+    end
+end)
+
+-- ═══════════════════════════════════════════════
+--  ESP TAB
+-- ═══════════════════════════════════════════════
+local ESPOverlaySec = ESPTab:Section("Overlays")
+
+ESPOverlaySec:Toggle("Box ESP", false, "ESPBox", function(v)
+    ESPSettings.ShowBox = v
+end)
+
+ESPOverlaySec:Toggle("Name Tags", false, "ESPName", function(v)
+    ESPSettings.ShowName = v
+end)
+
+ESPOverlaySec:Toggle("Health Bar", false, "ESPHealth", function(v)
+    ESPSettings.ShowHealth = v
+end)
+
+ESPOverlaySec:Toggle("Distance", false, "ESPDistance", function(v)
+    ESPSettings.ShowDistance = v
+end)
+
+ESPOverlaySec:Toggle("Skeleton", false, "ESPSkeleton", function(v)
+    ESPSettings.ShowSkeletons = v
+end)
+
+ESPOverlaySec:Toggle("Tracers", false, "ESPTracer", function(v)
+    ESPSettings.ShowTracer = v
+end)
+
+ESPOverlaySec:Dropdown("Tracer Origin", {"Bottom", "Middle", "Top"}, "Bottom", "ESPTracerPos", function(v)
+    ESPSettings.TracerPosition = v
+end)
+
+local ESPColorSec = ESPTab:Section("Colors")
+
+ESPColorSec:Colorpicker("Box Color", Color3.fromRGB(255, 255, 255), "ESPBoxColor", function(v)
+    ESPSettings.BoxColor = v
+    for _, d in pairs(espBoxDrawings) do d.Color = v end
+end)
+
+ESPColorSec:Colorpicker("Name Color", Color3.fromRGB(255, 255, 255), "ESPNameColor", function(v)
+    ESPSettings.NameColor = v
+    for _, d in pairs(espNameDrawings) do d.Color = v end
+end)
+
+ESPColorSec:Colorpicker("Skeleton Color", Color3.fromRGB(255, 255, 255), "ESPSkeletonColor", function(v)
+    ESPSettings.SkeletonsColor = v
+    for _, bones in pairs(espSkeletonBones) do
+        for _, b in ipairs(bones) do b.Color = v end
+    end
+end)
+
+ESPColorSec:Colorpicker("Tracer Color", Color3.fromRGB(255, 255, 255), "ESPTracerColor", function(v)
+    ESPSettings.TracerColor = v
+    for _, d in pairs(espTracerDrawings) do d.Color = v end
+end)
+
+-- ═══════════════════════════════════════════════
+--  MOVEMENT TAB
+-- ═══════════════════════════════════════════════
+local MobilitySection = MovementTab:Section("Mobility")
+
+MobilitySection:Toggle("Fly", false, "MoveFly", function(v)
+    MovementSettings.FlyEnabled = v
+    if v then startFlying() else stopFlying() end
+end)
+
+MobilitySection:Slider("Flight Speed", 5, 300, 50, 1, "MoveFlySpeed", function(v)
+    MovementSettings.FlySpeed = v
+end)
+
+MobilitySection:Toggle("Infinite Jump", false, "MoveInfJump", function(v)
+    MovementSettings.InfJump = v
+    if infJumpConn then infJumpConn:Disconnect() infJumpConn = nil end
+    if v then
+        infJumpConn = UserInputService.JumpRequest:Connect(function()
+            local hum = getHumanoid()
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
+    end
+end)
+
+MobilitySection:Toggle("Bunny Hop", false, "MoveBHop", function(v)
+    MovementSettings.BHop = v
+    if bhopConn then bhopConn:Disconnect() bhopConn = nil end
+    if v then
+        bhopConn = RunService.Heartbeat:Connect(function()
+            local hum = getHumanoid()
+            if hum and hum:GetState() == Enum.HumanoidStateType.Running then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    end
+end)
+
+local SpeedSection = MovementTab:Section("Speed")
+
+SpeedSection:Toggle("Speed Modifier", false, "MoveSpeed", function(v)
+    MovementSettings.SpeedEnabled = v
+    local hum = getHumanoid()
+    if hum then
+        hum.WalkSpeed = v and MovementSettings.WalkSpeed or defaultWalkSpeed
+    end
+end)
+
+SpeedSection:Slider("Walk Speed", 1, 250, 16, 1, "MoveWalkSpeed", function(v)
+    MovementSettings.WalkSpeed = v
+    if MovementSettings.SpeedEnabled then
+        local hum = getHumanoid()
+        if hum then hum.WalkSpeed = v end
+    end
+end)
+
+local ExtrasSection = MovementTab:Section("Extras")
+
+ExtrasSection:Toggle("Fake Lag", false, "MoveFakeLag", function(v)
+    MovementSettings.FakeLag = v
+    if v then startFakeLag() else stopFakeLag() end
+end)
+
+ExtrasSection:Toggle("Horizontal Spinbot", false, "MoveSpinbot", function(v)
+    MovementSettings.SpinbotHoriz = v
+    if horizSpinConn then horizSpinConn:Disconnect() horizSpinConn = nil end
+    if v then
+        horizSpinConn = RunService.Heartbeat:Connect(spinHoriz)
+    else
+        horizSpinAngle = 0
+    end
+end)
+
+ExtrasSection:Toggle("Anti-Fling", false, "MoveAntiFling", function(v)
+    if not v then
+        if _G.FedAntiFlingConn then _G.FedAntiFlingConn:Disconnect() _G.FedAntiFlingConn = nil end
+        return
+    end
+    if not _G.FedAntiFlingConn then
+        _G.FedAntiFlingConn = RunService.Heartbeat:Connect(function()
+            local h = getHRP()
+            if h and h.AssemblyLinearVelocity.Magnitude > 200 then
+                h.AssemblyLinearVelocity  = Vector3.zero
+                h.AssemblyAngularVelocity = Vector3.zero
+            end
+        end)
+    end
+end)
+
+ExtrasSection:Toggle("Auto Reset (Loop)", false, "MoveAutoReset", function(v)
+    MovementSettings.AutoReset = v
+    if autoResetThread then task.cancel(autoResetThread) autoResetThread = nil end
+    if v then
+        autoResetThread = task.spawn(function()
+            while MovementSettings.AutoReset do
+                local hum = getHumanoid()
+                if hum then hum.Health = 0 end
+                task.wait(2)
+            end
+        end)
+    end
+end)
+
+local CameraSection = MovementTab:Section("Camera")
+
+CameraSection:Toggle("Force First Person", false, "CamForceFP", function(v)
+    CameraSettings.ForceFP = v
+    if v then
+        CameraSettings.ForceTHP = false
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+    else
+        localPlayer.CameraMode = Enum.CameraMode.Classic
+    end
+end)
+
+CameraSection:Toggle("Force Third Person", false, "CamForceTHP", function(v)
+    CameraSettings.ForceTHP = v
+    if v then
+        CameraSettings.ForceFP = false
+        startForceThirdPerson()
+    else
+        stopForceThirdPerson()
+    end
+end)
+
+CameraSection:Slider("Field of View", 30, 120, 70, 1, "CamFOV", function(v)
+    CameraSettings.FOV = v
+    camera.FieldOfView = v
+end)
+
+-- ═══════════════════════════════════════════════
+--  PLAYERS TAB
+-- ═══════════════════════════════════════════════
+local PlayerInfoSec = PlayersTab:Section("Info")
+local friendCountLabel = PlayerInfoSec:Label("Friends in Server: 0")
+local nearCountLabel   = PlayerInfoSec:Label("Players Nearby (<50): 0")
+local targetLabel      = PlayerInfoSec:Label("Target: None")
+
+local PlayerTargetSec = PlayersTab:Section("Target")
+
+PlayerTargetSec:Label("Enter username or display name. Partial matches work. Separate with commas.")
+
+PlayerTargetSec:Textbox("Target Player(s)", false, function(v)
+    TeleportSettings.TargetPlayer = v
+end)
+
+local searchStatusLabel = PlayerTargetSec:Label("Status: Enter a name above")
+
+local PlayerActionsSec = PlayersTab:Section("Actions")
+
+PlayerActionsSec:Button("Teleport to Player", function()
+    local names = parsePlayerList(TeleportSettings.TargetPlayer)
+    if #names == 0 then return end
+    teleportToPlayer(names[1])
+end)
+
+PlayerActionsSec:Toggle("Loop Teleport", false, "PlayersLoopTp", function(v)
+    TeleportSettings.LoopTeleport = v
+    if loopTeleportConn then loopTeleportConn:Disconnect() loopTeleportConn = nil end
+    if v then
+        loopTeleportConn = RunService.Heartbeat:Connect(function()
+            local names = parsePlayerList(TeleportSettings.TargetPlayer)
+            for _, name in ipairs(names) do teleportToPlayer(name) end
+        end)
+    end
+end)
+
+PlayerActionsSec:Toggle("Loop Spook", false, "PlayersLoopSpook", function(v)
+    TeleportSettings.LoopSpook = v
+    if loopSpookConn then task.cancel(loopSpookConn) loopSpookConn = nil end
+    if v then
+        loopSpookConn = task.spawn(function()
+            while TeleportSettings.LoopSpook do
+                local names = parsePlayerList(TeleportSettings.TargetPlayer)
+                local hrp   = getHRP()
+                if hrp and #names > 0 then
+                    local origin = hrp.CFrame
+                    for _, name in ipairs(names) do
+                        local target = findPlayerByNameOrDisplay(name)
+                        local tHRP   = target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+                        if tHRP then
+                            local hrp2 = getHRP()
+                            if hrp2 then hrp2.CFrame = tHRP.CFrame * CFrame.new(0, 0, -4) end
+                            task.wait(0.3)
+                            local hrp3 = getHRP()
+                            if hrp3 then hrp3.CFrame = origin end
+                        end
+                    end
+                end
+                task.wait(0.1)
+            end
+        end)
+    end
+end)
+
+PlayerActionsSec:Toggle("Spectate Player", false, "PlayersSpectate", function(v)
+    TeleportSettings.SpectatePlayer = v
+    if spectateConn then spectateConn:Disconnect() spectateConn = nil end
+    if v then
+        spectateConn = RunService.RenderStepped:Connect(function()
+            local names  = parsePlayerList(TeleportSettings.TargetPlayer)
+            if #names == 0 then return end
+            local target = findPlayerByNameOrDisplay(names[1])
+            local tHum   = target and target.Character and target.Character:FindFirstChildOfClass("Humanoid")
+            if tHum then camera.CameraSubject = tHum end
+        end)
+    else
+        local hum = getHumanoid()
+        if hum then camera.CameraSubject = hum end
+    end
+end)
+
+PlayerActionsSec:Toggle("Stare At Player", false, "PlayersViewCam", function(v)
+    TeleportSettings.ViewPlayer = v
+    if viewPlayerConn then viewPlayerConn:Disconnect() viewPlayerConn = nil end
+    if v then
+        viewPlayerConn = RunService.RenderStepped:Connect(function()
+            local names  = parsePlayerList(TeleportSettings.TargetPlayer)
+            if #names == 0 then return end
+            local target = findPlayerByNameOrDisplay(names[1])
+            local tHead  = target and target.Character and target.Character:FindFirstChild("Head")
+            if tHead then camera.CFrame = CFrame.new(camera.CFrame.Position, tHead.Position) end
+        end)
+    else
+        camera.CameraType = Enum.CameraType.Custom
+    end
+end)
+
+-- ═══════════════════════════════════════════════
+--  WAYPOINTS TAB
+-- ═══════════════════════════════════════════════
+local WaypointInfoSec = WaypointsTab:Section("Info")
+WaypointInfoSec:Label("Save up to 5 positions. Save Here stores your spot, Go teleports back, Clear removes the slot.")
+
+local wpSlots = {}
+
+local function makeWaypointSlot(i)
+    local sec = WaypointsTab:Section("Slot " .. i)
+
+    local slotLbl = sec:Label("Slot " .. i .. ": empty")
+
+    sec:Button("Save Here — Slot " .. i, function()
+        local hrp = getHRP()
+        if not hrp then return end
+        wpSlots[i] = hrp.CFrame
+        pcall(function() slotLbl:Set("Slot " .. i .. ": saved") end)
+    end)
+
+    sec:Button("Go — Slot " .. i, function()
+        if not wpSlots[i] then return end
+        local hrp = getHRP()
+        if hrp then hrp.CFrame = wpSlots[i] end
+    end)
+
+    sec:Button("Clear — Slot " .. i, function()
+        wpSlots[i] = nil
+        pcall(function() slotLbl:Set("Slot " .. i .. ": empty") end)
+    end)
+end
+
+for i = 1, 5 do makeWaypointSlot(i) end
+
+local SpawnSec = WaypointsTab:Section("Spawn Point")
+
+SpawnSec:Button("Save Spawn Point", function()
+    local hrp = getHRP()
+    if not hrp then return end
+    TeleportSettings.SpawnPoint = hrp.CFrame
+end)
+
+SpawnSec:Button("Teleport to Spawn", function()
+    if not TeleportSettings.SpawnPoint then return end
+    local hrp = getHRP()
+    if hrp then hrp.CFrame = TeleportSettings.SpawnPoint end
+end)
+
+-- ═══════════════════════════════════════════════
+--  WORLD TAB
+-- ═══════════════════════════════════════════════
+local RetextureSec = WorldTab:Section("Retexture")
+
+local selectedMaterial = "Smooth Plastic"
+
+RetextureSec:Button("Save Original Map", function()
+    saveOriginalParts()
+end)
+
+RetextureSec:Dropdown("Map Material", {"Smooth Plastic","Brick","Sand","Ice","Wood","Neon","Metal","Grass","Glass"}, "Smooth Plastic", "WorldMaterial", function(v)
+    selectedMaterial = v
+end)
+
+RetextureSec:Colorpicker("Map Color", Color3.fromRGB(163, 162, 165), "WorldColor", function(v)
+    WorldSettings.Color = v
+end)
+
+RetextureSec:Button("Apply Retexture", function()
+    local mat = MATERIAL_MAP[selectedMaterial] or Enum.Material.SmoothPlastic
+    local col = WorldSettings.Color or Color3.fromRGB(163, 162, 165)
+    applyWorld(mat, col)
+end)
+
+RetextureSec:Button("Reset to Saved", function()
+    resetWorld()
+end)
+
+RetextureSec:Button("Clear All (Grey Plastic)", function()
+    clearAllWorld()
+end)
+
+local TimeSec = WorldTab:Section("Time of Day")
+
+TimeSec:Button("Daytime",  function() setTimeOfDay("Daytime")  end)
+TimeSec:Button("Sunset",   function() setTimeOfDay("Sunset")   end)
+TimeSec:Button("Night",    function() setTimeOfDay("Night")    end)
+
+local LightingSec = WorldTab:Section("Lighting")
+
+LightingSec:Colorpicker("Sky Ambient Color", Color3.fromRGB(178, 178, 178), "LightingAmbient", function(v)
+    Lighting.Ambient        = v
+    Lighting.OutdoorAmbient = v
+end)
+
+LightingSec:Colorpicker("Fog Color", Color3.fromRGB(200, 200, 200), "LightingFog", function(v)
+    Lighting.FogColor = v
+end)
+
+LightingSec:Slider("Brightness", 0, 10, 2, 0.1, "LightingBrightness", function(v)
+    Lighting.Brightness = v
+end)
+
+-- ═══════════════════════════════════════════════
+--  PROJECTION SORCERY TAB
+-- ═══════════════════════════════════════════════
+local ProjInfoSec = ProjectionTab:Section("What is Projection Sorcery?")
+
+ProjInfoSec:Label("A cursed technique from Jujutsu Kaisen used by the Zenin family.")
+ProjInfoSec:Label("Breaks 1 second of movement into 24 distinct pre-planned animation frames.")
+ProjInfoSec:Label("Grants massive stackable speed — but every frame must physically obey the path you mapped.")
+ProjInfoSec:Label("Anyone you touch is bound to your mapped path too — or they freeze for a full second.")
+
+local ProjRecordSec = ProjectionTab:Section("Frame Recording")
+
+ProjRecordSec:Label("Set your frame count, then Record to capture your movement path as frames. Ghost markers show each recorded position.")
+
+ProjRecordSec:Slider("Frames (1s window)", 1, 24, 24, 1, "ProjFrameCount", function(v)
+    ProjectionSettings.FrameCount = v
+end)
+
+ProjRecordSec:Button("Start Recording", function()
+    if ProjectionSettings.IsRecording then return end
+    stopPlayback()
+    clearGhostParts()
+    startProjectionRecording()
+end)
+
+ProjRecordSec:Button("Stop Recording", function()
+    stopProjectionRecording()
+end)
+
+ProjRecordSec:Button("Clear Frames + Ghosts", function()
+    stopProjectionRecording()
+    stopPlayback()
+    ProjectionSettings.RecordedFrames = {}
+    clearGhostParts()
+end)
+
+local ProjPlaySec = ProjectionTab:Section("Playback")
+
+ProjPlaySec:Label("Play back your recorded movement path. Speed multiplies or slows the 1-second window.")
+
+ProjPlaySec:Slider("Playback Speed", 0.1, 5, 1, 0.1, "ProjPlaybackSpeed", function(v)
+    ProjectionSettings.PlaybackSpeed = v
+end)
+
+ProjPlaySec:Toggle("Loop Playback", false, "ProjLoop", function(v)
+    ProjectionSettings.LoopPlayback = v
+end)
+
+ProjPlaySec:Button("Execute Projection", function()
+    if #ProjectionSettings.RecordedFrames == 0 then return end
+    stopPlayback()
+    clearGhostParts()
+    playbackProjection()
+end)
+
+ProjPlaySec:Button("Stop Playback", function()
+    stopPlayback()
+end)
+
+-- ═══════════════════════════════════════════════
+--  MISC TAB
+-- ═══════════════════════════════════════════════
+local AutoClickSec = MiscTab:Section("Auto Clicker")
+
+AutoClickSec:Label("Fires mouse clicks at the set CPS. Toggle via switch or keybind.")
+
+AutoClickSec:Toggle("Auto Clicker", false, "AutoClickerEnabled", function(v)
+    AutoClickerSettings.Enabled = v
+    if v then startAutoClicker() else stopAutoClicker() end
+end)
+
+AutoClickSec:Bind("Auto Clicker Toggle", Enum.KeyCode.F, false, "AutoClickerKeybind", function()
+    local newVal = not AutoClickerSettings.Enabled
+    AutoClickerSettings.Enabled = newVal
+    if newVal then startAutoClicker() else stopAutoClicker() end
+end)
+
+AutoClickSec:Slider("Clicks Per Second", 1, 30, 10, 1, "AutoClickerCPS", function(v)
+    AutoClickerSettings.CPS = v
+end)
+
+local ScriptSec = MiscTab:Section("Script")
+
+ScriptSec:Button("Unload Script", function()
+    pcall(function() RunService:UnbindFromRenderStep("FedAimbot") end)
+    if flyConn          then flyConn:Disconnect()          end
+    if flyForce         then flyForce:Destroy()            end
+    if horizSpinConn    then horizSpinConn:Disconnect()    end
+    if infJumpConn      then infJumpConn:Disconnect()      end
+    if bhopConn         then bhopConn:Disconnect()         end
+    if autoResetThread  then task.cancel(autoResetThread)  end
+    if loopTeleportConn then loopTeleportConn:Disconnect() end
+    if loopSpookConn    then task.cancel(loopSpookConn)    end
+    if viewPlayerConn   then viewPlayerConn:Disconnect()   end
+    if spectateConn     then spectateConn:Disconnect()     end
+    if forceTHPConn     then forceTHPConn:Disconnect()     end
+    stopFakeLag()
+    stopPlayback()
+    stopProjectionRecording()
+    clearGhostParts()
+    if _G.FedAntiFlingConn then _G.FedAntiFlingConn:Disconnect() end
+    if fovCircle        then fovCircle:Remove()            end
+    stopAutoClicker()
+    for player in pairs(espBoxDrawings) do removeESPForPlayer(player) end
+    for _, conn in pairs(espSkeletonConns) do conn:Disconnect() end
+    Workspace.Gravity      = defaultGravity
+    camera.FieldOfView     = 70
+    camera.CameraType      = Enum.CameraType.Custom
+    localPlayer.CameraMode = Enum.CameraMode.Classic
+    local hum = getHumanoid()
+    if hum then camera.CameraSubject = hum end
+    print("Fed FPS unloaded.")
+end)
+
+-- ─────────────────────────────────────────────────
+--  ESP PLAYER HOOKS
+-- ─────────────────────────────────────────────────
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        createESPForPlayer(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= localPlayer then
+        createESPForPlayer(player)
+        player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            removeESPForPlayer(player)
+            createESPForPlayer(player)
+        end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESPForPlayer(player)
+end)
+
+localPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    if MovementSettings.SpeedEnabled then
+        local hum = getHumanoid()
+        if hum then hum.WalkSpeed = MovementSettings.WalkSpeed end
+    end
+    if MovementSettings.FakeLag then
+        stopFakeLag()
+        task.wait(0.1)
+        MovementSettings.FakeLag = true
+        startFakeLag()
+    end
+end)
+
+-- ─────────────────────────────────────────────────
+--  PLAYER INFO UPDATE
+-- ─────────────────────────────────────────────────
+local lastSearchQuery = ""
+
+local function updatePlayerInfo()
+    local hrp = getHRP()
+    if not hrp then return end
+    local friendCount = 0
+    local nearCount   = 0
+    local target      = getClosestPlayer()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == localPlayer then continue end
+        if localPlayer:IsFriendsWith(p.UserId) then friendCount += 1 end
+        local pHRP = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+        if pHRP and (hrp.Position - pHRP.Position).Magnitude < 50 then
+            nearCount += 1
+        end
+    end
+    pcall(function() friendCountLabel:Set("Friends in Server: " .. friendCount) end)
+    pcall(function() nearCountLabel:Set("Players Nearby (<50): " .. nearCount) end)
+    pcall(function() targetLabel:Set("Target: " .. (target and target.Name or "None")) end)
+
+    local query = TeleportSettings.TargetPlayer or ""
+    if query ~= lastSearchQuery then
+        lastSearchQuery = query
+        if query == "" then
+            pcall(function() searchStatusLabel:Set("Status: Enter a name above") end)
+        else
+            local names = parsePlayerList(query)
+            local allFound = true
+            local foundNames = {}
+            for _, name in ipairs(names) do
+                local found = findPlayerByNameOrDisplay(name)
+                if found then
+                    foundNames[#foundNames+1] = found.Name
+                else
+                    allFound = false
+                end
+            end
+            if #names == 0 then
+                pcall(function() searchStatusLabel:Set("Status: Enter a name above") end)
+            elseif allFound then
+                local txt = "Found: " .. table.concat(foundNames, ", ")
+                pcall(function() searchStatusLabel:Set(txt) end)
+            else
+                pcall(function() searchStatusLabel:Set("Not found in server") end)
+            end
+        end
+    end
+end
+
+-- ─────────────────────────────────────────────────
+--  MAIN RENDER / HEARTBEAT LOOPS
+-- ─────────────────────────────────────────────────
+RunService.RenderStepped:Connect(function()
+    local anyESP = ESPSettings.ShowBox or ESPSettings.ShowName or ESPSettings.ShowHealth
+                or ESPSettings.ShowDistance or ESPSettings.ShowTracer
+    if not anyESP then
+        for player in pairs(espBoxDrawings) do
+            local b   = espBoxDrawings[player]      if b   then b.Visible   = false end
+            local n   = espNameDrawings[player]     if n   then n.Visible   = false end
+            local hbg = espHealthBGDrawings[player] if hbg then hbg.Visible = false end
+            local hb  = espHealthDrawings[player]   if hb  then hb.Visible  = false end
+            local d   = espDistDrawings[player]     if d   then d.Visible   = false end
+            local t   = espTracerDrawings[player]   if t   then t.Visible   = false end
+        end
+        return
+    end
+    for player in pairs(espBoxDrawings) do
+        updateESPForPlayer(player)
+    end
+end)
+
+RunService:BindToRenderStep("FedAimbot", Enum.RenderPriority.Camera.Value + 1, function()
+    if fovCircle then
+        fovCircle.Position = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+        fovCircle.Radius   = AimbotSettings.FOV
+    end
+
+    if AimbotSettings.Enabled and aiming then
+        local target = getClosestPlayer()
+        if target and target.Character then
+            local head = target.Character:FindFirstChild("Head")
+            if head then
+                local cameraPos = camera.CFrame.Position
+                local newCF     = CFrame.new(cameraPos, head.Position)
+                local smooth    = math.clamp(1 - (AimbotSettings.Smoothing / 100), 0.01, 1)
+                if AimbotSettings.RageAim then
+                    camera.CFrame = newCF
+                else
+                    camera.CFrame = camera.CFrame:Lerp(newCF, smooth)
+                end
+            end
+        end
+    end
+
+    if AimbotSettings.SilentAim then
+        local target = getClosestPlayer()
+        if target and target.Character then
+            local bone = getBonePart(target.Character, AimbotSettings.Bone) or target.Character:FindFirstChild("Head")
+            silentTarget = bone and bone.Position or nil
+        else
+            silentTarget = nil
+        end
+    else
+        silentTarget = nil
+    end
+
+    if AimbotSettings.TriggerBot then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == localPlayer then continue end
+            if not isAlive(player) then continue end
+            local character = player.Character
+            if not character then continue end
+            local head = character:FindFirstChild("Head")
+            if not head then continue end
+            local camCF    = camera.CFrame
+            local toTarget = (head.Position - camCF.Position).Unit
+            local dot      = camCF.LookVector:Dot(toTarget)
+            if dot > 0.985 then
+                mouse1click()
+                break
+            end
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    updatePlayerInfo()
+end)
+
+-- ─────────────────────────────────────────────────
+--  INPUT HOOKS
+-- ─────────────────────────────────────────────────
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == AimbotSettings.AimbotBind then aiming = true  end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == AimbotSettings.AimbotBind then aiming = false end
+end)
+
+print("fedscripts | SolarisLib loaded successfully.")
 
 end
 
