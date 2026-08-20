@@ -1,0 +1,1339 @@
+--// ================================================================
+--//   SCRIPT SOURCES — paste your scripts here
+--// ================================================================
+
+local function RunFlingScript()
+
+    -- Orbit | Fling Things and People
+-- Converted to SolarisLib
+
+local SolarisLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/fedscripts/Orbit-UI/refs/heads/main/Library", true))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- =============================================
+-- CORE REFERENCES (from original script)
+-- =============================================
+local CharacterEvents = ReplicatedStorage:WaitForChild("CharacterEvents")
+local GrabEvents = ReplicatedStorage:WaitForChild("GrabEvents")
+local _SetNetworkOwner = GrabEvents:WaitForChild("SetNetworkOwner")
+local _DestroyGrabLine = GrabEvents:WaitForChild("DestroyGrabLine")
+local _CreateGrabLine = GrabEvents:WaitForChild("CreateGrabLine")
+local _RagdollRemote = CharacterEvents:WaitForChild("RagdollRemote")
+local _Struggle = CharacterEvents:WaitForChild("Struggle")
+local _IsHeld = LocalPlayer:WaitForChild("IsHeld")
+local _InPlot = LocalPlayer:WaitForChild("InPlot")
+local PoisonBig = Workspace.Map.Hole.PoisonBigHole.PoisonHurtPart
+local PoisonSmall = Workspace.Map.Hole.PoisonSmallHole.PoisonHurtPart
+local PoisonFactory = Workspace.Map.FactoryIsland.PoisonContainer.PoisonHurtPart
+
+PoisonBig.Size = Vector3.new(2,2,2)
+PoisonSmall.Size = Vector3.new(2,2,2)
+PoisonFactory.Size = Vector3.new(2,2,2)
+PoisonBig.Position = Vector3.new(0,-50,0)
+PoisonSmall.Position = Vector3.new(0,-50,0)
+PoisonFactory.Position = Vector3.new(0,-50,0)
+
+local apagarfogo = Workspace.Map.Hole.PoisonBigHole.ExtinguishPart
+apagarfogo.Size = Vector3.new(0.5,0.5,0.5)
+apagarfogo.Transparency = 1
+
+local SpawnToyRF = ReplicatedStorage:WaitForChild("MenuToys"):WaitForChild("SpawnToyRemoteFunction")
+local DeleteToyRE = ReplicatedStorage:WaitForChild("MenuToys"):WaitForChild("DestroyToy")
+
+local _OuterUFO = Workspace.Map.AlwaysHereTweenedObjects:FindFirstChild("OuterUFO")
+if _OuterUFO and _OuterUFO:FindFirstChild("Object") and _OuterUFO.Object:FindFirstChild("ObjectModel") then
+	_OuterUFO = _OuterUFO.Object.ObjectModel.PaintPlayerPart
+	_OuterUFO:WaitForChild("WeldConstraint").Enabled = false
+	_OuterUFO.Anchored = true
+	_OuterUFO.Shape = Enum.PartType.Block
+	_OuterUFO.Transparency = 1
+	_OuterUFO.Size = Vector3.new(0.5, 0.5, 0.5)
+	_OuterUFO.Position = Vector3.new(0, -50, 0)
+end
+
+-- =============================================
+-- HELPER FUNCTIONS
+-- =============================================
+local function GetPlayerCharacter()
+	local char = LocalPlayer.Character
+	if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChildOfClass("Humanoid") then
+		return char
+	end
+end
+
+local function GetPlayerRoot()
+	local char = GetPlayerCharacter()
+	if char then return char.HumanoidRootPart end
+end
+
+local function GetPlayerCFrame()
+	local root = GetPlayerRoot()
+	if root then return root.CFrame end
+end
+
+local function TeleportPlayer(cf)
+	local char = GetPlayerCharacter()
+	if char then
+		char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame.Rotation + cf.Position
+		char:FindFirstChildOfClass("Humanoid").Sit = false
+	end
+end
+
+local function lookAt(from, to)
+	local unit = (to - from).Unit
+	local right = unit:Cross(Vector3.new(0,1,0))
+	local up = right:Cross(unit)
+	return CFrame.fromMatrix(from, right, up)
+end
+
+local function SNOWshipPlayer(player, callback)
+	if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+		local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local dist = LocalPlayer:DistanceFromCharacter(hrp.Position)
+			local partowner = hrp:FindFirstChild("PartOwner")
+			if partowner and partowner.Value == LocalPlayer.Name then
+				if type(callback) == "function" then callback() end
+				return true
+			end
+			if dist <= 30 then
+				_SetNetworkOwner:FireServer(hrp, lookAt(LocalPlayer.Character.HumanoidRootPart.Position, hrp.Position))
+			end
+		end
+	end
+end
+
+local function SNOWship(part)
+	if part and typeof(part) == "Instance" then
+		local dist = LocalPlayer:DistanceFromCharacter(part.Position)
+		if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and dist <= 30 then
+			_SetNetworkOwner:FireServer(part, lookAt(LocalPlayer.Character.HumanoidRootPart.Position, part.Position))
+		end
+	end
+end
+
+local function CheckPlayer(p)
+	if typeof(p) == "Instance" and p ~= LocalPlayer and p.Character and p.Character:IsDescendantOf(Workspace) then
+		local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+		local hum = p.Character:FindFirstChildOfClass("Humanoid")
+		if hrp and hum and hum.Health > 0 then return true end
+	end
+end
+
+local function IsPlayerInsideSafeZone(p)
+	if typeof(p) == "Instance" and p:IsA("Player") and p:FindFirstChild("InPlot") and p.InPlot.Value then
+		return true
+	end
+end
+
+local function CheckPlayerForLoopKill(p)
+	if CheckPlayer(p) and not IsPlayerInsideSafeZone(p) then
+		return true
+	end
+end
+
+local function CreateSkyVelocity(part)
+	if not part:FindFirstChild("SkyVelocity") then
+		local bv = Instance.new("BodyVelocity", part)
+		bv.Name = "SkyVelocity"
+		bv.Velocity = Vector3.new(0, 100000000000000, 0)
+		bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	end
+end
+
+-- CheckNetworkOwnerShipOnPlayer (from Bliz script)
+local function CheckNetworkOwnerShipOnPlayer(p, p2)
+	if typeof(p) == "Instance" and (p:IsA("Player") and p.Character) and (p.Character:FindFirstChild("Head") and (p.Character.Head:FindFirstChild("PartOwner") and p.Character.Head.PartOwner.Value == LocalPlayer.Name)) then
+		return not p2 and true or p.Character.Head.PartOwner
+	end
+end
+
+local Camera = Workspace.CurrentCamera
+
+-- =============================================
+-- Campfire burn function (u613 equivalent) -- needed for Burn Grab
+-- =============================================
+local _Debris = game:GetService("Debris")
+
+local holdfirePartFound = nil
+
+local function checkHoldFirePart()
+	local v584 = LocalPlayer:WaitForChild(LocalPlayer.Name .. "SpawnedInToys") or Workspace:FindFirstChild(LocalPlayer.Name .. "SpawnedInToys")
+	if not v584 then return end
+	local v588 = nil
+	for _, v589 in pairs(v584:GetChildren()) do
+		if v589.Name == "Campfire" and not v589:GetAttribute("FirePlayerPart") then
+			if v589.FirePlayerPart.CanBurn.Value then
+				v588 = v589
+			end
+		end
+	end
+	if not v588 then
+		local v590 = {
+			"Campfire",
+			CFrame.new(508.073517, 67.2614441, -261.901917, -0.133750245, -0.471861839, 0.871468484, -3.7252903e-9, 0.879369617, 0.476139903, -0.991015136, 0.0636838302, -0.117615893),
+			Vector3.new(0, 97.69000244140625, 0),
+		}
+		SpawnToyRF:InvokeServer(unpack(v590))
+	end
+	holdfirePartFound = v588
+end
+
+local u583 = nil
+
+local function u591()
+	if holdfirePartFound and holdfirePartFound.Parent ~= nil then
+		return holdfirePartFound
+	end
+	checkHoldFirePart()
+end
+
+local u17 = nil
+task.spawn(function()
+	u17 = Workspace:WaitForChild(LocalPlayer.Name .. "SpawnedInToys")
+end)
+
+local function SetModelProperties(p444)
+	for _, v448 in pairs(p444:GetDescendants()) do
+		if v448:IsA("BasePart") then
+			v448.CanCollide = false
+		end
+	end
+end
+
+local function u604()
+	if not u17 then return end
+	local v592 = GetPlayerCFrame()
+	local u597 = nil
+	local u598 = nil
+	for _, v599 in pairs(u17:GetChildren()) do
+		if v599.Name == "Campfire" and v599.PrimaryPart then
+			if LocalPlayer:DistanceFromCharacter(v599.PrimaryPart.Position) < 30 and v599.FirePlayerPart.CanBurn.Value then
+				u597 = v599
+			end
+		end
+	end
+	if not u597 then
+		if v592 then
+			local v600 = {
+				"Campfire",
+				CFrame.new(v592.Position.X, v592.Position.Y, v592.Position.Z, -0.133750245, -0.471861839, 0.871468484, -3.7252903e-9, 0.879369617, 0.476139903, -0.991015136, 0.0636838302, -0.117615893),
+				Vector3.new(0, 97.69000244140625, 0),
+			}
+			SpawnToyRF:InvokeServer(unpack(v600))
+		end
+	end
+	if u597 and u597:FindFirstChild("FirePlayerPart") and (u597.FirePlayerPart:FindFirstChild("CanBurn") and not u597:GetAttribute("Connected2")) then
+		local u602 = u597.DescendantAdded:Connect(function(p601)
+			if p601.Name == "PartOwner" and p601.Value ~= LocalPlayer.Name then
+				u597:SetAttribute("AlreadySetOwnerShip", false)
+			end
+		end)
+		task.spawn(function()
+			u598 = u597.FirePlayerPart
+			while u597.Parent do
+				local v603 = not u597.FirePlayerPart.CanBurn.Value and u591()
+				if v603 then
+					u598.Position = v603.FirePlayerPart.Position
+				end
+				if not u597:GetAttribute("AlreadySetOwnerShip") then
+					local SNOWshipOnce_hrp = u598
+					local dist2 = LocalPlayer:DistanceFromCharacter(SNOWshipOnce_hrp.Position)
+					if dist2 <= 30 then
+						_SetNetworkOwner:FireServer(SNOWshipOnce_hrp, lookAt(LocalPlayer.Character.HumanoidRootPart.Position, SNOWshipOnce_hrp.Position))
+						u597:SetAttribute("AlreadySetOwnerShip", true)
+					elseif dist2 > 30 then
+						DeleteToyRE:FireServer(u597)
+					end
+				end
+				task.wait(0.1)
+			end
+			u602:Disconnect()
+		end)
+		u597:SetAttribute("Connected2", true)
+	end
+	u583 = u597
+end
+
+local function u605()
+	if u583 and u583.Parent ~= nil then
+		return u583
+	end
+	u604()
+end
+
+local function u613(p606)
+	local u607 = u605()
+	local v608 = nil
+	local _Character3 = LocalPlayer.Character
+	if _Character3 then
+		_Character3 = _Character3:FindFirstChild("Head")
+	end
+	if u607 then
+		v608 = u607.PrimaryPart
+	end
+	if u607 and _Character3 and v608 then
+		local _FirePlayerPart2 = u607:FindFirstChild("FirePlayerPart")
+		local _CampfirePosRemove = v608:FindFirstChild("CampfirePosRemove")
+		_FirePlayerPart2.Size = Vector3.new(2, 2, 2)
+		if not _CampfirePosRemove and u607:GetAttribute("AlreadySetOwnerShip") then
+			SetModelProperties(u607)
+			local _BodyPosition4 = Instance.new("BodyPosition", u607.PrimaryPart)
+			_BodyPosition4.Name = "CampfirePosRemove"
+			_BodyPosition4.MaxForce = Vector3.new(12500, 12500, 12500)
+			task.spawn(function()
+				while u607.Parent do
+					_BodyPosition4.Position = _Character3.Position + Vector3.new(5, 500, 0)
+					task.wait()
+				end
+			end)
+		end
+		if _FirePlayerPart2 and p606 and (u607:GetAttribute("AlreadySetOwnerShip") and v608) then
+			_FirePlayerPart2.Position = p606.Position
+			task.wait()
+			_FirePlayerPart2.Position = v608.Position
+		end
+	end
+end
+
+-- =============================================
+-- STATE
+-- =============================================
+_G.AntiGrab = false
+_G.AntiBurn = false
+_G.AntiExplosion = false
+_G.AntiVoid = false
+_G.SilentAim = false
+_G.SilentAimRange = 50
+_G.SuperStrength = false
+_G.Strength = 400
+_G.PoisonGrab = false
+_G.BurnGrab = false
+_G.LoopKill = false
+_G.LoopRagdoll = false
+_G.LoopKillTarget = nil
+_G.LoopTPTarget = nil
+_G.SpectateTarget = nil
+_G.SpectateActive = false
+_G.ClickTeleportBind = Enum.KeyCode.Z
+_G.SuperSpeed = false
+_G.InfiniteJump = false
+_G.NoclipToggle = false
+local Multiplier = 0.15
+
+-- Noclip state
+local noclipConn = nil
+local function enableNoclip()
+	if noclipConn then return end
+	noclipConn = RunService.Stepped:Connect(function()
+		if _G.NoclipToggle and LocalPlayer.Character then
+			for _, p in pairs(LocalPlayer.Character:GetChildren()) do
+				if p:IsA("BasePart") and p.CanCollide then
+					p.CanCollide = false
+				end
+			end
+		end
+	end)
+end
+local function disableNoclip()
+	if noclipConn then
+		noclipConn:Disconnect()
+		noclipConn = nil
+	end
+end
+
+-- Anti-void
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+		if _G.AntiVoid then
+			local char = GetPlayerCharacter()
+			if char and char.HumanoidRootPart.Position.Y < -800 then
+				char:SetPrimaryPartCFrame(CFrame.new(0, 10, 0))
+			end
+		end
+	end
+end)
+
+-- Anti-grab
+local u28 = nil
+_IsHeld.Changed:Connect(function(val)
+	if val == true and _G.AntiGrab then
+		local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+		local hrp = char:WaitForChild("HumanoidRootPart")
+		local conn
+		conn = RunService.Heartbeat:Connect(function()
+			if _IsHeld.Value then
+				hrp.Velocity = Vector3.new()
+				hrp.Anchored = true
+				_Struggle:FireServer(LocalPlayer)
+				_RagdollRemote:FireServer(hrp, 0)
+			else
+				hrp.Velocity = Vector3.new()
+				hrp.Anchored = false
+				conn:Disconnect()
+			end
+		end)
+	end
+end)
+
+-- Anti-burn
+local function setupAntiBurn(char)
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	local fp = hrp:WaitForChild("FirePlayerPart", 3)
+	if not fp then return end
+	local canBurn = fp:WaitForChild("CanBurn", 3)
+	if not canBurn then return end
+	canBurn.Changed:Connect(function(v)
+		if v and _G.AntiBurn then
+			while canBurn.Value do
+				if firetouchinterest then
+					firetouchinterest(fp, apagarfogo, 0)
+					task.wait()
+					firetouchinterest(fp, apagarfogo, 1)
+				else
+					apagarfogo.CFrame = fp.CFrame * CFrame.new(math.random(-1,1), math.random(-1,1), math.random(-1,1))
+					task.wait()
+					apagarfogo.Position = Vector3.new(0,-100,0)
+				end
+			end
+		end
+	end)
+end
+
+-- Anti-explosion
+local function setupAntiExplosion(char)
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+	local ragdolled = hum:WaitForChild("Ragdolled", 3)
+	if not ragdolled then return end
+	ragdolled.Changed:Connect(function(v)
+		if v and _G.AntiExplosion then
+			while ragdolled.Value do
+				hrp.Anchored = true
+				hrp.Velocity = Vector3.new()
+				task.wait()
+			end
+			hrp.Velocity = Vector3.new()
+			hrp.Anchored = false
+		end
+	end)
+end
+
+local function reconnectCharacter(char)
+	if not char then return end
+	task.wait(0.5)
+	setupAntiBurn(char)
+	setupAntiExplosion(char)
+end
+
+reconnectCharacter(LocalPlayer.Character)
+LocalPlayer.CharacterAdded:Connect(reconnectCharacter)
+
+-- Click Teleport function
+local function doClickTeleport()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local camPart = char:FindFirstChild("CamPart") or char:FindFirstChild("Head")
+	if not camPart then return end
+	local origin = camPart.Position
+	local direction = Camera.CFrame.LookVector * 40
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {char}
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local result = Workspace:Raycast(origin, direction, rayParams)
+	local targetPos
+	if result then
+		targetPos = result.Position + Vector3.new(0, 3, 0)
+	else
+		targetPos = origin + direction + Vector3.new(0, 0, 0)
+	end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		local steps = 6
+		local startPos = hrp.Position
+		for i = 1, steps do
+			local t = i / steps
+			local et = 1 - (1-t)^3
+			hrp.CFrame = CFrame.new(startPos:Lerp(targetPos, et)) * hrp.CFrame.Rotation
+			task.wait()
+		end
+	end
+end
+
+-- Loop kill thread (EXACT from Bliz script)
+task.spawn(function()
+	while true do
+		task.wait(0.2)
+		if _G.LoopKill and _G.LoopKillTarget then
+			local target = Players:FindFirstChild(_G.LoopKillTarget)
+			if CheckPlayerForLoopKill(target) then
+				local hrp = target.Character:FindFirstChild("HumanoidRootPart")
+				local head = target.Character:FindFirstChild("Head")
+				local hum = target.Character:FindFirstChild("Humanoid")
+				local savedPos = GetPlayerCFrame()
+				if target and hrp and head then
+					for _ = 0, 50 do
+						local function noclipEnable()
+							if LocalPlayer.Character then
+								for _, p in pairs(LocalPlayer.Character:GetChildren()) do
+									if p:IsA("BasePart") and p.CanCollide then
+										p.CanCollide = false
+									end
+								end
+							end
+						end
+						noclipEnable()
+						SNOWship(hrp)
+						if not (CheckPlayerForLoopKill(target) and _G.LoopKill) or (CheckNetworkOwnerShipOnPlayer(target) or 500 < hrp.AssemblyLinearVelocity.Magnitude) then
+							_DestroyGrabLine:FireServer(hrp)
+							CreateSkyVelocity(hrp)
+							break
+						end
+						task.wait()
+						if hrp.Position.Y <= -12 then
+							TeleportPlayer(CFrame.new(hrp.Position + Vector3.new(0, 5, -15)))
+						else
+							TeleportPlayer(CFrame.new(hrp.Position + Vector3.new(0, -10, -10)))
+						end
+						hum.BreakJointsOnDeath = false
+						hum:ChangeState(Enum.HumanoidStateType.Dead)
+						hum.Jump = true
+						hum.Sit = false
+					end
+					if savedPos then TeleportPlayer(savedPos) end
+				end
+			end
+		end
+	end
+end)
+
+-- Spectate thread
+local spectateConn = nil
+local function startSpectate(playerName)
+	if spectateConn then spectateConn:Disconnect() spectateConn = nil end
+	local target = Players:FindFirstChild(playerName)
+	if not target then return end
+	spectateConn = RunService.RenderStepped:Connect(function()
+		if not _G.SpectateActive then
+			if spectateConn then spectateConn:Disconnect() spectateConn = nil end
+			local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if hum then Camera.CameraSubject = hum end
+			Camera.CameraType = Enum.CameraType.Custom
+			return
+		end
+		local t = Players:FindFirstChild(playerName)
+		if t and t.Character then
+			local thum = t.Character:FindFirstChildOfClass("Humanoid")
+			if thum then
+				Camera.CameraSubject = thum
+				Camera.CameraType = Enum.CameraType.Follow
+			end
+		end
+	end)
+end
+
+local function stopSpectate()
+	_G.SpectateActive = false
+	if spectateConn then spectateConn:Disconnect() spectateConn = nil end
+	local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+	if hum then Camera.CameraSubject = hum end
+	Camera.CameraType = Enum.CameraType.Custom
+end
+
+-- Super speed
+RunService.Heartbeat:Connect(function()
+	if _G.SuperSpeed and LocalPlayer.Character then
+		local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hrp and hum then
+			hrp.CFrame = hrp.CFrame + hum.MoveDirection * Multiplier
+		end
+	end
+end)
+
+-- Infinite jump
+UserInputService.JumpRequest:Connect(function()
+	if _G.InfiniteJump and LocalPlayer.Character then
+		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum:ChangeState("Jumping") end
+	end
+end)
+
+-- =============================================
+-- GRAB EFFECTS (fixed: Poison, Death, Radioactive from Bliz script)
+-- =============================================
+
+Workspace.ChildAdded:Connect(function(p1462)
+	if p1462.Name ~= "GrabParts" then return end
+
+	local grabPart = p1462:WaitForChild("GrabPart", 2)
+	if not grabPart then return end
+	local weld = grabPart:FindFirstChild("WeldConstraint")
+	if not weld then return end
+	local _Part19 = weld.Part1
+	if not _Part19 then return end
+
+	local u1464 = nil
+
+	-- Super Strength
+	if _G.SuperStrength then
+		u1464 = Instance.new("BodyVelocity", _Part19)
+		u1464.MaxForce = Vector3.new(0, 0, 0)
+		u1464.Velocity = Vector3.new()
+		u1464.Name = "SuperStrength"
+	end
+
+	_G.HoldingObjectGrabPart = _Part19
+
+	-- Massless Grab
+	if _G.MasslessGrab then
+		task.spawn(function()
+			local dragPart = p1462:WaitForChild("DragPart", 2)
+			if not dragPart then return end
+			local _AlignOrientation = dragPart:FindFirstChild("AlignOrientation")
+			local _AlignPosition = dragPart:FindFirstChild("AlignPosition")
+			if not _AlignOrientation or not _AlignPosition then return end
+			while _G.MasslessGrab and p1462.Parent do
+				_AlignOrientation.MaxTorque = 1e46
+				_AlignOrientation.Responsiveness = 20099
+				_AlignPosition.MaxForce = 1e51
+				_AlignPosition.Responsiveness = 20099
+				task.wait(0.245)
+			end
+			_AlignOrientation.MaxTorque = 600000
+			_AlignOrientation.Responsiveness = 30
+			_AlignPosition.MaxForce = 60000
+			_AlignPosition.Responsiveness = 40
+		end)
+	end
+
+	-- Noclip Grab
+	if _G.NoclipGrab and not _Part19.Anchored then
+		task.spawn(function()
+			if _Part19.Parent and _Part19.Parent:IsA("Model") then
+				local descendants = _Part19.Parent:GetDescendants()
+				local _Humanoid14 = _Part19.Parent:FindFirstChildOfClass("Humanoid")
+				local oldCollide = {}
+				for _, v in pairs(descendants) do
+					if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+						oldCollide[v] = v.CanCollide
+					end
+				end
+				while p1462.Parent do
+					for _, v in pairs(descendants) do
+						if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+							v.CanCollide = false
+						end
+					end
+					wait(0.214)
+				end
+				if _Humanoid14 then task.wait(0.5) end
+				for _, v in pairs(descendants) do
+					if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+						v.CanCollide = oldCollide[v]
+					end
+				end
+			end
+		end)
+	end
+
+	-- Super Strength launch on mouse release
+	task.spawn(function()
+		if u1464 then
+			local u1503
+			u1503 = p1462:GetPropertyChangedSignal("Parent"):Connect(function()
+				if not p1462.Parent then
+					if UserInputService:GetLastInputType() ~= Enum.UserInputType.MouseButton2 or not _G.SuperStrength then
+						if UserInputService:GetLastInputType() == Enum.UserInputType.MouseButton1 then
+							u1464:Destroy()
+						end
+					else
+						u1464.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+						u1464.Velocity = Camera.CFrame.LookVector * _G.Strength
+						_Debris:AddItem(u1464, 1)
+					end
+					u1503:Disconnect()
+				end
+			end)
+		end
+	end)
+
+	-- Poison Grab (FIXED: exact from Bliz script)
+	if _G.Poison_Grab then
+		task.spawn(function()
+			if _Part19.Parent:FindFirstChildOfClass("Humanoid") then
+				local _Head10 = _Part19.Parent:FindFirstChild("Head")
+				if not _Head10 then return end
+				while p1462.Parent and _G.Poison_Grab do
+					PoisonBig.CFrame = _Head10.CFrame
+					PoisonSmall.CFrame = _Head10.CFrame
+					PoisonFactory.CFrame = _Head10.CFrame
+					task.wait()
+					PoisonBig.Position = Vector3.new(0, -50, 0)
+					PoisonSmall.Position = Vector3.new(0, -50, 0)
+					PoisonFactory.Position = Vector3.new(0, -50, 0)
+				end
+			end
+		end)
+	end
+
+	-- Burn Grab (uses u613)
+	if _G.Burn_Grab then
+		task.spawn(function()
+			while p1462.Parent and _G.Burn_Grab do
+				if _Part19.Parent:FindFirstChildOfClass("Humanoid") then
+					u613(_Part19.Parent.HumanoidRootPart)
+				elseif _Part19.Parent:FindFirstChild("FireDetector") then
+					u613(_Part19.Parent.FireDetector)
+				else
+					u613(_Part19)
+				end
+				task.wait()
+			end
+		end)
+	end
+
+	-- Death Grab (FIXED: exact from Bliz script)
+	if _G.Death_Grab then
+		task.spawn(function()
+			if _Part19.Parent:FindFirstChildOfClass("Humanoid") then
+				local _Humanoid15 = _Part19.Parent:FindFirstChildOfClass("Humanoid")
+				while _Part19.Parent do
+					local playerOwner = Players:GetPlayerFromCharacter(_Part19.Parent)
+					if CheckNetworkOwnerShipOnPlayer(playerOwner) then
+						_Humanoid15.BreakJointsOnDeath = false
+						_Humanoid15:ChangeState(Enum.HumanoidStateType.Dead)
+						_Humanoid15.Jump = true
+						_Humanoid15.Sit = false
+						if _Humanoid15:GetStateEnabled(Enum.HumanoidStateType.Dead) then
+							_DestroyGrabLine:FireServer(_Part19)
+						end
+					end
+					task.wait()
+				end
+			end
+		end)
+	end
+
+	-- Radioactive Grab (FIXED: exact from Bliz script)
+	if _G.Radiactive_Grab then
+		task.spawn(function()
+			if _Part19.Parent:FindFirstChildOfClass("Humanoid") then
+				while p1462.Parent and _G.Radiactive_Grab do
+					if _OuterUFO then
+						_OuterUFO.Position = _Part19.Position
+					end
+					task.wait()
+				end
+				if _OuterUFO then
+					_OuterUFO.Position = Vector3.new(0, -50, 0)
+				end
+			end
+		end)
+	end
+
+end)
+
+-- =============================================
+-- BUILD THE UI
+-- =============================================
+local win = SolarisLib:New({
+	Name = "Orbit | Fling Things and People",
+	FolderToSave = "OrbitFTAP"
+})
+
+-- =============================================
+-- TAB: CLIENT
+-- =============================================
+local clientTab = win:Tab("Client")
+
+-- Section: Defensive
+local defSec = clientTab:Section("Defensive")
+
+defSec:Toggle("Anti-Grab", false, "AntiGrab", function(v)
+	_G.AntiGrab = v
+	if v then _Struggle:FireServer(LocalPlayer) end
+end)
+
+defSec:Toggle("Anti-Burn", false, "AntiBurn", function(v)
+	_G.AntiBurn = v
+end)
+
+defSec:Toggle("Anti-Explosion", false, "AntiExplosion", function(v)
+	_G.AntiExplosion = v
+end)
+
+defSec:Toggle("Anti-Void", false, "AntiVoid", function(v)
+	_G.AntiVoid = v
+	if v then
+		Workspace.FallenPartsDestroyHeight = -1000
+	else
+		Workspace.FallenPartsDestroyHeight = -100
+	end
+end)
+
+-- Section: Movement
+local moveSec = clientTab:Section("Movement")
+
+moveSec:Toggle("Noclip", false, "Noclip", function(v)
+	_G.NoclipToggle = v
+	if v then enableNoclip() else disableNoclip() end
+end)
+
+moveSec:Toggle("Speed Boost", false, "SpeedBoost", function(v)
+	_G.SuperSpeed = v
+end)
+
+moveSec:Slider("Speed Multiplier", 0.1, 5, 0.15, 0.05, "SpeedMult", function(v)
+	Multiplier = v
+end)
+
+moveSec:Toggle("Infinite Jump", false, "InfJump", function(v)
+	_G.InfiniteJump = v
+end)
+
+moveSec:Slider("Jump Power", 24, 1000, 50, 10, "JumpPower", function(v)
+	_G.InfiniteJumpPower = v
+	if LocalPlayer.Character then
+		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.JumpPower = v end
+	end
+end)
+
+-- Section: Click Teleport Keybind
+local tpSec = clientTab:Section("Click Teleport")
+
+local clickTpEnabled = false
+tpSec:Bind("Teleport (hop forward)", Enum.KeyCode.Z, false, "ClickTeleportBind", function()
+	doClickTeleport()
+end)
+
+-- Section: Auto Get Coins
+local coinSec = clientTab:Section("Auto Get Coins")
+
+local timelefttextlabelingame = Workspace.Slots.Slots.Screen.SlotGui.TimeLeftFrame.TimeText
+local TimeRemainingLabel = coinSec:Label("Time Remaining: 0:00")
+local CoinsWonLabel = coinSec:Label("Coins Won: 0")
+
+timelefttextlabelingame.Changed:Connect(function(p)
+	if p == "Text" then
+		TimeRemainingLabel:Set("Time Remaining: " .. timelefttextlabelingame.Text)
+	end
+end)
+
+task.spawn(function()
+	for _, v in pairs(Workspace.Slots:GetDescendants()) do
+		if v.Name == "CoinAmount" and tostring(v.Parent) == "CoinsFrame" then
+			v.Changed:Connect(function(p)
+				local pname = v.Parent.Parent.SpinningFrame.PlayerName
+				if p == "Text" and pname.Text == LocalPlayer.DisplayName and CoinsWonLabel then
+					CoinsWonLabel:Set(v.Text)
+				end
+			end)
+		end
+	end
+end)
+
+local function u757_slots()
+	local v755 = nil
+	for _, v756 in pairs(Workspace.Slots:GetChildren()) do
+		if v756.SlotHandle.LightBall.Material ~= Enum.Material.Neon then
+			v755 = false
+			break
+		end
+		v755 = true
+	end
+	return v755
+end
+
+local function SNOWship_local(part)
+	if part and typeof(part) == "Instance" then
+		local dist = LocalPlayer:DistanceFromCharacter(part.Position)
+		if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and dist <= 30 then
+			local _SetNetworkOwnerLocal = ReplicatedStorage:WaitForChild("GrabEvents"):WaitForChild("SetNetworkOwner")
+			local from = LocalPlayer.Character.HumanoidRootPart.Position
+			local to = part.Position
+			local unit = (to - from).Unit
+			local right = unit:Cross(Vector3.new(0,1,0))
+			local up = right:Cross(unit)
+			_SetNetworkOwnerLocal:FireServer(part, CFrame.fromMatrix(from, right, up))
+		end
+	end
+end
+
+local savedSpinPos = nil
+local automakecointoggle = nil
+automakecointoggle = coinSec:Toggle("Auto-Spin", false, "AutoSpinCoins", function(p767)
+	_G.AutoFarmCoins = p767
+	if p767 then
+		while _G.AutoFarmCoins do
+			if u757_slots() then
+				savedSpinPos = GetPlayerCFrame()
+				local u768 = nil
+				local v769 = task.spawn(function()
+					while true do
+						if u768 then
+							TeleportPlayer(u768.CFrame + Vector3.new(0, 5, 0))
+							task.wait(0.2)
+							SNOWship_local(u768)
+						end
+						task.wait()
+					end
+				end)
+				for _, v773 in pairs(Workspace.Slots:GetChildren()) do
+					u768 = v773.SlotHandle.Handle
+					u768.CanCollide = false
+					local v774 = u768
+					for _ = 1, 5 do task.wait(0.2) end
+					v774.CanCollide = true
+					if not u757_slots() then break end
+				end
+				task.cancel(v769)
+				if savedSpinPos then TeleportPlayer(savedSpinPos) end
+			end
+			task.wait(5)
+		end
+	end
+end)
+
+-- =============================================
+-- TAB: GRAB
+-- =============================================
+local grabTab = win:Tab("Grab")
+
+-- Section: Super Strength
+local strSec = grabTab:Section("Super Strength")
+
+strSec:Toggle("Super Strength", false, "SuperStr", function(v)
+	_G.SuperStrength = v
+end)
+
+strSec:Slider("Launch Force", 400, 10000, 400, 100, "StrengthVal", function(v)
+	_G.Strength = v
+end)
+
+-- Section: Grab Effects
+local gfxSec = grabTab:Section("Grab Effects")
+
+gfxSec:Toggle("Massless Grab", false, "MasslessGrab", function(v)
+	_G.MasslessGrab = v
+end)
+
+gfxSec:Toggle("Noclip Grab", false, "NoclipGrab", function(v)
+	_G.NoclipGrab = v
+end)
+
+-- =============================================
+-- TAB: PLAYERS
+-- =============================================
+local playersTab = win:Tab("Players")
+
+-- Build player list helper
+local function getPlayerList()
+	local list = {}
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			table.insert(list, p.Name)
+		end
+	end
+	table.sort(list)
+	return list
+end
+
+-- Section: Target
+local targetSec = playersTab:Section("Select Target")
+
+local selectedTarget = ""
+local targetDrop = targetSec:Dropdown("Target Player", getPlayerList(), "", "TargetPlayer", function(v)
+	selectedTarget = v
+	_G.LoopKillTarget = v
+	_G.LoopTPTarget = v
+	_G.SpectateTargetName = v
+end)
+
+-- Section: Loop Kill
+local lkSec = playersTab:Section("Loop Kill")
+
+lkSec:Toggle("Loop Kill", false, "LoopKill", function(v)
+	_G.LoopKill = v
+	if v and selectedTarget == "" then
+		warn("Orbit: Select a target player first.")
+		_G.LoopKill = false
+	end
+end)
+
+-- Section: Teleport to Player
+local tpPlayerSec = playersTab:Section("Teleport")
+
+tpPlayerSec:Button("Teleport to Player", function()
+	if selectedTarget == "" then return end
+	local target = Players:FindFirstChild(selectedTarget)
+	if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+		local targetHRP = target.Character.HumanoidRootPart
+		TeleportPlayer(targetHRP.CFrame * CFrame.new(0, 0, 4))
+	end
+end)
+
+-- Section: Spectate
+local specSec = playersTab:Section("Spectate")
+
+local spectateToggleRef = nil
+spectateToggleRef = specSec:Toggle("Spectate Player", false, "SpectateToggle", function(v)
+	_G.SpectateActive = v
+	if v then
+		if selectedTarget == "" then
+			_G.SpectateActive = false
+			if spectateToggleRef then spectateToggleRef:Set(false) end
+			return
+		end
+		startSpectate(selectedTarget)
+	else
+		stopSpectate()
+	end
+end)
+
+-- =============================================
+-- Footer label
+-- =============================================
+local creditTab = win:Tab("Info")
+local creditSec = creditTab:Section("Orbit")
+creditSec:Label("Orbit | Fling Things and People")
+creditSec:Label("made for pug and zerpill")
+creditSec:Label("made by fed (:")
+
+end
+
+local function RunUniversalScript()
+
+    -- PASTE YOUR UNIVERSAL SCRIPT SOURCE HERE
+
+end
+
+--// ================================================================
+--// Setting Configuration
+--// ================================================================
+local Config = {
+    UI = {
+        Fonts = {
+            Main = Enum.Font.SourceSansLight
+        },
+        Colors = {
+            Backdrop   = Color3.fromRGB(15, 15, 15),
+            Background = Color3.fromRGB(0, 0, 0),
+            Fill       = Color3.fromRGB(222, 222, 222),
+            Text       = Color3.fromRGB(255, 255, 255),
+            Success    = Color3.fromRGB(100, 255, 100),
+            Error      = Color3.fromRGB(255, 100, 100)
+        },
+        Sizes = {
+            BarWidth  = 0.3,
+            BarHeight = 0.025
+        }
+    },
+    Animation = {
+        TweenDuration = 1.5,
+        FadeDuration  = 2.0
+    }
+}
+
+--// ================================================================
+--// Game & Executor Detection
+--// ================================================================
+local FLING_GAME_ID = 6961824067
+
+local isFlingGame = game.PlaceId == FLING_GAME_ID
+
+-- Executor name detection (covers most popular executors)
+local function GetExecutorName()
+    if identifyexecutor then
+        local name = identifyexecutor()
+        if name and name ~= "" then return name end
+    end
+    if syn and syn.request then return "Synapse X" end
+    if KRNL_LOADED then return "Krnl" end
+    if CARBONARA then return "Carbon" end
+    if MACSPLOIT_LOADED then return "MacSploit" end
+    if getexecutorname then
+        local name = getexecutorname()
+        if name and name ~= "" then return name end
+    end
+    return "Unknown Executor"
+end
+
+local ExecutorName = GetExecutorName()
+
+--// ================================================================
+--// Script Debugging & Anti-Error
+--// ================================================================
+if not LPH_OBFUSCATED then
+    function LPH_JIT_MAX(...) return ... end
+    function LPH_NO_VIRTUALIZE(...) return ... end
+    function LPH_CRASH() return end
+    function LPH_ENCSTR(...) return ... end
+end
+local debug_log = function(...) if getgenv().Log then warn(...) end end
+
+--// ================================================================
+--// Services
+--// ================================================================
+local CoreGui      = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+
+--// ================================================================
+--// UI Setup
+--// ================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name   = "Professional Loader"
+ScreenGui.Parent = CoreGui
+
+-- Backdrop
+local Backdrop = Instance.new("Frame", ScreenGui)
+Backdrop.Name                  = "Backdrop"
+Backdrop.BackgroundColor3      = Config.UI.Colors.Backdrop
+Backdrop.BackgroundTransparency = 1
+Backdrop.BorderSizePixel       = 0
+Backdrop.AnchorPoint           = Vector2.new(0.5, 0.5)
+Backdrop.Position              = UDim2.new(0.5, 0, 0.77, 0)
+Backdrop.Size                  = UDim2.new(0.34, 0, 0.1, 0)
+Instance.new("UICorner", Backdrop)
+
+-- Background Bar
+local BackgroundBar = Instance.new("Frame", ScreenGui)
+BackgroundBar.Name                  = "Background Bar"
+BackgroundBar.BackgroundColor3      = Config.UI.Colors.Background
+BackgroundBar.BackgroundTransparency = 1
+BackgroundBar.BorderSizePixel       = 0
+BackgroundBar.AnchorPoint           = Vector2.new(0.5, 0.5)
+BackgroundBar.Position              = UDim2.new(0.5, 0, 0.75, 0)
+BackgroundBar.Size                  = UDim2.new(Config.UI.Sizes.BarWidth, 0, Config.UI.Sizes.BarHeight, 0)
+Instance.new("UICorner", BackgroundBar)
+
+-- Loading Fill Bar
+local LoadingBar = Instance.new("Frame", ScreenGui)
+LoadingBar.Name             = "Loading Bar"
+LoadingBar.BackgroundColor3 = Config.UI.Colors.Fill
+LoadingBar.BorderSizePixel  = 0
+LoadingBar.Position         = UDim2.new(0.35, 0, 0.7375, 0)
+LoadingBar.Size             = UDim2.new(0, 0, Config.UI.Sizes.BarHeight, 0)
+Instance.new("UICorner", LoadingBar)
+
+-- Executor label (top-left of bar)
+local ExecutorLabel = Instance.new("TextLabel", BackgroundBar)
+ExecutorLabel.Name               = "ExecutorLabel"
+ExecutorLabel.BackgroundTransparency = 1
+ExecutorLabel.Position           = UDim2.new(0, 0, -2.2, 0)
+ExecutorLabel.Size               = UDim2.new(1, 0, 0, 0)
+ExecutorLabel.Font               = Config.UI.Fonts.Main
+ExecutorLabel.Text               = ExecutorName
+ExecutorLabel.TextColor3         = Color3.fromRGB(180, 180, 180)
+ExecutorLabel.TextSize           = 13
+ExecutorLabel.TextXAlignment     = Enum.TextXAlignment.Left
+ExecutorLabel.TextTransparency   = 1
+
+-- Action Text (Left)
+local Message = Instance.new("TextLabel", BackgroundBar)
+Message.Name               = "Message"
+Message.BackgroundTransparency = 1
+Message.Position           = UDim2.new(0, 0, 1.7, 0)
+Message.Size               = UDim2.new(0, 0, 0, 0)
+Message.Font               = Config.UI.Fonts.Main
+Message.Text               = "Waiting..."
+Message.TextColor3         = Config.UI.Colors.Text
+Message.TextSize           = BackgroundBar.AbsoluteSize.Y
+Message.TextXAlignment     = Enum.TextXAlignment.Left
+Message.RichText           = true
+
+-- Percentage Text (Right)
+local Status = Instance.new("TextLabel", BackgroundBar)
+Status.Name               = "Status"
+Status.BackgroundTransparency = 1
+Status.Position           = UDim2.new(1, 0, 1.7, 0)
+Status.Size               = UDim2.new(0, 0, 0, 0)
+Status.Font               = Config.UI.Fonts.Main
+Status.Text               = "0%"
+Status.TextColor3         = Config.UI.Colors.Text
+Status.TextSize           = BackgroundBar.AbsoluteSize.Y
+Status.TextXAlignment     = Enum.TextXAlignment.Right
+
+--// ================================================================
+--// Animation Setup
+--// ================================================================
+local LoadingInfo = TweenInfo.new(Config.Animation.TweenDuration, Enum.EasingStyle.Sine)
+local FadeInfo    = TweenInfo.new(Config.Animation.FadeDuration)
+
+local BGAppear          = TweenService:Create(BackgroundBar,  FadeInfo,    {BackgroundTransparency = 0.6})
+local BGDisappear       = TweenService:Create(BackgroundBar,  FadeInfo,    {BackgroundTransparency = 1})
+local BackdropAppear    = TweenService:Create(Backdrop,       FadeInfo,    {BackgroundTransparency = 0.4})
+local BackdropDisappear = TweenService:Create(Backdrop,       FadeInfo,    {BackgroundTransparency = 1})
+local BarDisappear      = TweenService:Create(LoadingBar,     LoadingInfo, {BackgroundTransparency = 1})
+local MessageClear      = TweenService:Create(Message,        FadeInfo,    {TextTransparency = 1})
+local StatusClear       = TweenService:Create(Status,         FadeInfo,    {TextTransparency = 1})
+local ExecLabelAppear   = TweenService:Create(ExecutorLabel,  FadeInfo,    {TextTransparency = 0})
+local ExecLabelClear    = TweenService:Create(ExecutorLabel,  FadeInfo,    {TextTransparency = 1})
+
+local FailTween   = TweenService:Create(LoadingBar, LoadingInfo, {BackgroundColor3 = Config.UI.Colors.Error})
+local PassedTween = TweenService:Create(LoadingBar, LoadingInfo, {BackgroundColor3 = Config.UI.Colors.Success})
+
+--// ================================================================
+--// Core Logic
+--// ================================================================
+local currentPercentage = 0
+
+getgenv().NextStep = function(targetPercentage, text, addwait)
+    targetPercentage = math.clamp(targetPercentage, 0, 100)
+
+    local LoadingTween = TweenService:Create(
+        LoadingBar,
+        LoadingInfo,
+        {Size = UDim2.new((Config.UI.Sizes.BarWidth / 100) * targetPercentage, 0, Config.UI.Sizes.BarHeight, 0)}
+    )
+
+    if targetPercentage > currentPercentage then
+        task.spawn(function()
+            local Difference  = targetPercentage - currentPercentage
+            local WaitTime    = Config.Animation.TweenDuration / Difference
+            local SavedTarget = targetPercentage
+
+            for i = currentPercentage + 1, targetPercentage do
+                if SavedTarget ~= targetPercentage then break end
+                Status.Text = string.format("%i%%", i)
+                task.wait(WaitTime)
+            end
+
+            if SavedTarget == targetPercentage then
+                Status.Text = string.format("%i%%", targetPercentage)
+            end
+        end)
+    end
+
+    currentPercentage  = targetPercentage
+    Message.Text       = text
+    LoadingTween:Play()
+
+    if addwait then
+        LoadingTween.Completed:Wait()
+    end
+end
+
+local function DestroyBar()
+    if LoadingBar.BackgroundColor3 == Config.UI.Colors.Error then
+        local CloseTween = TweenService:Create(LoadingBar, LoadingInfo, {
+            Size = UDim2.new(0, LoadingBar.AbsoluteSize.Y, Config.UI.Sizes.BarHeight, 0),
+            BackgroundTransparency = 1
+        })
+
+        task.spawn(function()
+            local Current = tonumber(string.match(Status.Text, "%d+")) or 0
+            if Current > 0 then
+                local WaitTime = Config.Animation.TweenDuration / Current
+                for i = Current - 1, 0, -1 do
+                    Status.Text = string.format("%i%%", i)
+                    task.wait(WaitTime)
+                end
+                Status.Text = "0%"
+            end
+        end)
+
+        CloseTween:Play()
+        CloseTween.Completed:Wait()
+    end
+
+    BackdropDisappear:Play()
+    BGDisappear:Play()
+    BarDisappear:Play()
+    MessageClear:Play()
+    StatusClear:Play()
+    ExecLabelClear:Play()
+
+    BarDisappear.Completed:Wait()
+    ScreenGui:Destroy()
+end
+
+--// ================================================================
+--// Loading States
+--// ================================================================
+
+-- Shared early-stage states (same for all games)
+local EarlyStates = {
+    {Percent = 10, Text = "Starting " .. ExecutorName .. " environment...", Delay = 0.3},
+    {Percent = 22, Text = "Hooking memory read/write functions...",          Delay = 0.6},
+    {Percent = 35, Text = "Bypassing game integrity checks...",              Delay = 0.7},
+    {Percent = 48, Text = "Resolving function addresses...",                 Delay = 0.5},
+}
+
+-- Game-specific states (appear after early stages)
+local GameStates
+if isFlingGame then
+    GameStates = {
+        {Percent = 58, Text = "Fling Things and People Script detected!",   Delay = 0.4},
+        {Percent = 68, Text = "Loading fling physics module...",             Delay = 0.6},
+        {Percent = 78, Text = "Injecting velocity manipulation hooks...",    Delay = 0.5},
+        {Percent = 88, Text = "Patching ragdoll constraints...",             Delay = 0.5},
+        {Percent = 95, Text = "Finalizing fling script...",                 Delay = 0.4},
+    }
+else
+    GameStates = {
+        {Percent = 58, Text = "Scanning game environment...",               Delay = 0.4},
+        {Percent = 68, Text = "Loading universal module...",                Delay = 0.6},
+        {Percent = 78, Text = "Hooking remote event handlers...",           Delay = 0.5},
+        {Percent = 88, Text = "Applying compatibility patches...",          Delay = 0.5},
+        {Percent = 95, Text = "Finalizing universal script...",             Delay = 0.4},
+    }
+end
+
+--// ================================================================
+--// Execution
+--// ================================================================
+BackdropAppear:Play()
+BGAppear:Play()
+ExecLabelAppear:Play()
+
+task.spawn(function()
+    task.wait(Config.Animation.FadeDuration / 2)
+
+    -- Run early shared states
+    for _, State in ipairs(EarlyStates) do
+        task.wait(State.Delay)
+        getgenv().NextStep(State.Percent, State.Text, true)
+    end
+
+    -- Run game-specific states
+    for _, State in ipairs(GameStates) do
+        task.wait(State.Delay)
+        getgenv().NextStep(State.Percent, State.Text, true)
+    end
+
+    -- Final step
+    task.wait(0.3)
+    getgenv().NextStep(100, "Injecting...", true)
+
+    -- Success animation
+    task.wait(0.3)
+    PassedTween:Play()
+    Message.Text = "Done."
+    PassedTween.Completed:Wait()
+
+    task.wait(0.8)
+    DestroyBar()
+
+    -- ================================================================
+    --  SCRIPT EXECUTION — runs only after the bar fully completes
+    -- ================================================================
+    if isFlingGame then
+        task.spawn(RunFlingScript)
+    else
+        task.spawn(RunUniversalScript)
+    end
+end)
